@@ -3,12 +3,12 @@
 
 package config
 
-import "time"
-
-type Config struct {
-	Period time.Duration `config:"period"`
+type TracebeatConfig struct {
+	Period  *int64
+	Host    *string
+	MaxHops *int
 }
 
-var DefaultConfig = Config{
-	Period: 1 * time.Second,
+type ConfigSettings struct {
+	Input TracebeatConfig
 }

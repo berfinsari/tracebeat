@@ -2,9 +2,12 @@ package beater
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/aeden/traceroute"
 	"github.com/elastic/beats/libbeat/beat"
+	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/libbeat/publisher"
@@ -13,34 +16,104 @@ import (
 )
 
 type Tracebeat struct {
-	done   chan struct{}
-	config config.Config
-	client publisher.Client
+	done     chan struct{}
+	config   config.TracebeatConfig
+	client   publisher.Client
+	period   time.Duration
+	TbConfig config.ConfigSettings
+	host     string
+	maxHops  int
+	hops     [][]string
 }
 
-// Creates beater
+const selector = "tracebeat"
+
 func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
-	config := config.DefaultConfig
-	if err := cfg.Unpack(&config); err != nil {
-		return nil, fmt.Errorf("Error reading config file: %v", err)
+	tb := &Tracebeat{
+		done: make(chan struct{}),
+	}
+	err := cfgfile.Read(&tb.TbConfig, "")
+	if err != nil {
+		logp.Err("Error reading configuration file: %v", err)
+		return nil, fmt.Errorf("Error reading configuration file: %v", err)
 	}
 
-	bt := &Tracebeat{
-		done:   make(chan struct{}),
-		config: config,
-	}
-	return bt, nil
+	return tb, nil
+
 }
 
-func (bt *Tracebeat) Run(b *beat.Beat) error {
-	logp.Info("tracebeat is running! Hit CTRL-C to stop it.")
+func (tb *Tracebeat) CheckConfig(b *beat.Beat) {
+	if tb.TbConfig.Input.Period != nil {
+		tb.period = time.Duration(*tb.TbConfig.Input.Period) * time.Second
+	} else {
+		tb.period = 30 * time.Second
+	}
 
-	bt.client = b.Publisher.Connect()
-	ticker := time.NewTicker(bt.config.Period)
+	tb.host = *tb.TbConfig.Input.Host
+	fmt.Printf("tb.host = %v", tb.host)
+
+	if tb.TbConfig.Input.MaxHops != nil {
+		tb.maxHops = *tb.TbConfig.Input.MaxHops
+	} else {
+		tb.maxHops = 64
+	}
+
+	options := traceroute.TracerouteOptions{}
+	options.SetMaxHops(tb.maxHops)
+
+}
+
+func (tb *Tracebeat) HopsAyarla(hop traceroute.TracerouteHop) []string {
+	var dizi []string
+	addr := fmt.Sprintf("%v.%v.%v.%v", hop.Address[0], hop.Address[1], hop.Address[2], hop.Address[3])
+	hostOrAddr := addr
+	if hop.Host != "" {
+		hostOrAddr = hop.Host
+	}
+	if hop.Success {
+		ttlcon := strconv.Itoa(hop.TTL)
+		//elaptime := strconv.Itoa(hop.ElapsedTime)
+		dizi = append(dizi, ttlcon, hostOrAddr, addr)
+	}
+	return dizi
+}
+
+func (tb *Tracebeat) TraceHops() {
+	options := traceroute.TracerouteOptions{}
+	options.SetMaxHops(tb.maxHops)
+	ttl_sayisi := 0
+	c := make(chan traceroute.TracerouteHop, 0)
+	go func() {
+		for {
+			hop, ok := <-c
+			if !ok {
+				fmt.Println("hop not ok")
+				return
+			}
+
+			dizi := tb.HopsAyarla(hop)
+			tb.hops = append(tb.hops, dizi)
+			ttl_sayisi++
+		}
+	}()
+
+	_, err := traceroute.Traceroute(tb.host, &options, c)
+	if err != nil {
+		logp.Err("Error", err)
+	}
+}
+func (tb *Tracebeat) Run(b *beat.Beat) error {
+	logp.Info("tracebeat is running! Hit CTRL-C to stop it.")
+	tb.CheckConfig(b)
+	tb.TraceHops()
+	tb.client = b.Publisher.Connect()
 	counter := 1
+	ticker := time.NewTicker(tb.period)
+	defer ticker.Stop()
+
 	for {
 		select {
-		case <-bt.done:
+		case <-tb.done:
 			return nil
 		case <-ticker.C:
 		}
@@ -50,13 +123,13 @@ func (bt *Tracebeat) Run(b *beat.Beat) error {
 			"type":       b.Name,
 			"counter":    counter,
 		}
-		bt.client.PublishEvent(event)
+		tb.client.PublishEvent(event)
 		logp.Info("Event sent")
 		counter++
 	}
 }
 
-func (bt *Tracebeat) Stop() {
-	bt.client.Close()
-	close(bt.done)
+func (tb *Tracebeat) Stop() {
+	tb.client.Close()
+	close(tb.done)
 }

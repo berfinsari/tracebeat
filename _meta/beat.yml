@@ -2,6 +2,11 @@
 
 ############################# Tracebeat ######################################
 
-tracebeat:
+input:
   # Defines how often an event is sent to the output
-  period: 1s
+  period: 30
+
+  # traceroute host  komutu için.
+  host: 8.8.8.8
+
+  maxhops: 64
