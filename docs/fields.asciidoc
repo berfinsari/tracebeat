@@ -134,6 +134,15 @@ type: long
 
 required: True
 
-PLEASE UPDATE DOCUMENTATION
 
+
+[float]
+== traceroute Fields
+
+Contains hops.
+
+
+
+[float]
+=== traceroute.hops
 

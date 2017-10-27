@@ -6,4 +6,24 @@
       type: long
       required: true
       description: >
-        PLEASE UPDATE DOCUMENTATION
+
+    - name: traceroute
+      type: group
+      description: >
+        Contains hops.
+      fields:
+        - name: hops
+        - type: group
+          description: >
+          fields:
+            - name: ttl
+              type: string
+
+            - name: host
+              type: string
+
+            - name: ip
+              type: string
+
+            - name: time
+              type: string
