@@ -2,7 +2,6 @@ package beater
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/aeden/traceroute"
@@ -39,78 +38,20 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 	}
 
 	return tb, nil
-
 }
 
-func (tb *Tracebeat) CheckConfig(b *beat.Beat) {
-	if tb.TbConfig.Input.Period != nil {
-		tb.period = time.Duration(*tb.TbConfig.Input.Period) * time.Second
-	} else {
-		tb.period = 30 * time.Second
-	}
-
-	tb.host = *tb.TbConfig.Input.Host
-	fmt.Printf("tb.host = %v", tb.host)
-
-	if tb.TbConfig.Input.MaxHops != nil {
-		tb.maxHops = *tb.TbConfig.Input.MaxHops
-	} else {
-		tb.maxHops = 64
-	}
-
-	options := traceroute.TracerouteOptions{}
-	options.SetMaxHops(tb.maxHops)
-
-}
-
-func (tb *Tracebeat) HopsAyarla(hop traceroute.TracerouteHop) []string {
-	var dizi []string
-	addr := fmt.Sprintf("%v.%v.%v.%v", hop.Address[0], hop.Address[1], hop.Address[2], hop.Address[3])
-	hostOrAddr := addr
-	if hop.Host != "" {
-		hostOrAddr = hop.Host
-	}
-	if hop.Success {
-		ttlcon := strconv.Itoa(hop.TTL)
-		//elaptime := strconv.Itoa(hop.ElapsedTime)
-		dizi = append(dizi, ttlcon, hostOrAddr, addr)
-	}
-	return dizi
-}
-
-func (tb *Tracebeat) TraceHops() {
-	options := traceroute.TracerouteOptions{}
-	options.SetMaxHops(tb.maxHops)
-	ttl_sayisi := 0
-	c := make(chan traceroute.TracerouteHop, 0)
-	go func() {
-		for {
-			hop, ok := <-c
-			if !ok {
-				fmt.Println("hop not ok")
-				return
-			}
-
-			dizi := tb.HopsAyarla(hop)
-			tb.hops = append(tb.hops, dizi)
-			ttl_sayisi++
-		}
-	}()
-
-	_, err := traceroute.Traceroute(tb.host, &options, c)
-	if err != nil {
-		logp.Err("Error", err)
-	}
-}
 func (tb *Tracebeat) Run(b *beat.Beat) error {
 	logp.Info("tracebeat is running! Hit CTRL-C to stop it.")
-	tb.CheckConfig(b)
-	tb.TraceHops()
-	tb.client = b.Publisher.Connect()
-	counter := 1
-	ticker := time.NewTicker(tb.period)
-	defer ticker.Stop()
 
+	tb.client = b.Publisher.Connect()
+	tb.CheckConfig(b)
+	traceroute, traceerr := tb.TraceHops(b) //return değeri geliyor
+	if traceerr != nil {
+		return fmt.Errorf("%v", traceerr)
+	}
+
+	ticker := time.NewTicker(tb.period)
+	counter := 1
 	for {
 		select {
 		case <-tb.done:
@@ -122,11 +63,35 @@ func (tb *Tracebeat) Run(b *beat.Beat) error {
 			"@timestamp": common.Time(time.Now()),
 			"type":       b.Name,
 			"counter":    counter,
+			"traceroute": traceroute,
 		}
 		tb.client.PublishEvent(event)
 		logp.Info("Event sent")
 		counter++
 	}
+}
+
+func (tb *Tracebeat) CheckConfig(b *beat.Beat) {
+	if tb.TbConfig.Input.Period != nil {
+		tb.period = time.Duration(*tb.TbConfig.Input.Period) * time.Second
+	} else {
+		tb.period = 30 * time.Second
+	}
+
+	tb.host = *tb.TbConfig.Input.Host
+
+	if tb.TbConfig.Input.MaxHops != nil {
+		tb.maxHops = *tb.TbConfig.Input.MaxHops
+	} else {
+		tb.maxHops = 64
+	}
+
+	options := traceroute.TracerouteOptions{}
+	options.SetMaxHops(tb.maxHops)
+
+	logp.Debug(selector, "Host %v", tb.host)
+	logp.Debug(selector, "Period %v", tb.period)
+	logp.Debug(selector, "MaxHops %v", tb.maxHops)
 }
 
 func (tb *Tracebeat) Stop() {
