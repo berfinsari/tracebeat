@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aeden/traceroute"
 	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
@@ -15,14 +14,16 @@ import (
 )
 
 type Tracebeat struct {
-	done     chan struct{}
-	config   config.TracebeatConfig
-	client   publisher.Client
-	period   time.Duration
-	TbConfig config.ConfigSettings
-	host     string
-	maxHops  int
-	hops     [][]string
+	done       chan struct{}
+	config     config.TracebeatConfig
+	client     publisher.Client
+	TbConfig   config.ConfigSettings
+	period     time.Duration
+	host       string
+	timeoutMs  int
+	packetSize int
+	maxHops    int
+	retries    int
 }
 
 const selector = "tracebeat"
@@ -45,10 +46,6 @@ func (tb *Tracebeat) Run(b *beat.Beat) error {
 
 	tb.client = b.Publisher.Connect()
 	tb.CheckConfig(b)
-	traceroute, traceerr := tb.TraceHops(b) //return değeri geliyor
-	if traceerr != nil {
-		return fmt.Errorf("%v", traceerr)
-	}
 
 	ticker := time.NewTicker(tb.period)
 	counter := 1
@@ -59,6 +56,10 @@ func (tb *Tracebeat) Run(b *beat.Beat) error {
 		case <-ticker.C:
 		}
 
+		traceroute, traceerr := tb.Trace(b)
+		if traceerr != nil {
+			return fmt.Errorf("%v", traceerr)
+		}
 		event := common.MapStr{
 			"@timestamp": common.Time(time.Now()),
 			"type":       b.Name,
@@ -86,12 +87,31 @@ func (tb *Tracebeat) CheckConfig(b *beat.Beat) {
 		tb.maxHops = 64
 	}
 
-	options := traceroute.TracerouteOptions{}
-	options.SetMaxHops(tb.maxHops)
+	if tb.TbConfig.Input.TimeoutMs != nil {
+		tb.timeoutMs = *tb.TbConfig.Input.TimeoutMs
+	} else {
+		tb.timeoutMs = 500
+	}
 
-	logp.Debug(selector, "Host %v", tb.host)
+	if tb.TbConfig.Input.PacketSize != nil {
+		tb.packetSize = *tb.TbConfig.Input.PacketSize
+	} else {
+		tb.packetSize = 60
+	}
+
+	if tb.TbConfig.Input.Retries != nil {
+		tb.retries = *tb.TbConfig.Input.Retries
+	} else {
+		tb.retries = 3
+	}
+
 	logp.Debug(selector, "Period %v", tb.period)
-	logp.Debug(selector, "MaxHops %v", tb.maxHops)
+	logp.Debug(selector, "Host %v", tb.host)
+	logp.Debug(selector, "Max Hops %d", tb.maxHops)
+	logp.Debug(selector, "TimeoutMs %d", tb.timeoutMs)
+	logp.Debug(selector, "Packet Size %d", tb.packetSize)
+	logp.Debug(selector, "Retries %d", tb.retries)
+
 }
 
 func (tb *Tracebeat) Stop() {
