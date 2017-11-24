@@ -8,22 +8,6 @@
       description: >
 
     - name: traceroute
-      type: group
+      type: keyword
       description: >
         Contains hops.
-      fields:
-        - name: hops
-        - type: group
-          description: >
-          fields:
-            - name: ttl
-              type: string
-
-            - name: host
-              type: string
-
-            - name: ip
-              type: string
-
-            - name: time
-              type: string

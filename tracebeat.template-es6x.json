@@ -74,6 +74,10 @@
         "tags": {
           "ignore_above": 1024,
           "type": "keyword"
+        },
+        "traceroute": {
+          "ignore_above": 1024,
+          "type": "keyword"
         }
       }
     }

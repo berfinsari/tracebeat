@@ -137,12 +137,10 @@ required: True
 
 
 [float]
-== traceroute Fields
+=== traceroute
+
+type: keyword
 
 Contains hops.
 
-
-
-[float]
-=== traceroute.hops
 

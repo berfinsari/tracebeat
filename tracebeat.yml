@@ -4,12 +4,23 @@
 
 input:
   # Defines how often an event is sent to the output
+  # Default to 30s
   period: 30
 
-  # traceroute host  komutu için.
   host: 8.8.8.8
 
+  # Default to 64
   maxhops: 64
+
+  # Default to 3
+  retries: 3
+
+  # Default to 500ms
+  timeoutms: 500
+
+  # Packet size in byte
+  # Default to 60
+  packetsize: 60
 
 #================================ General =====================================
 

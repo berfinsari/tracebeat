@@ -4,9 +4,12 @@
 package config
 
 type TracebeatConfig struct {
-	Period  *int64
-	Host    *string
-	MaxHops *int
+	Period     *int64
+	Host       *string
+	MaxHops    *int
+	TimeoutMs  *int
+	PacketSize *int
+	Retries    *int
 }
 
 type ConfigSettings struct {
