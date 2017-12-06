@@ -275,3 +275,7 @@ make package
 ```
 
 This will fetch and create all images required for the build process. The hole process to finish can take several minutes.
+
+## License
+Covered under the Apache License, Version 2.0
+Copyright (c) 2017 Berfin Sarı
