@@ -7,6 +7,8 @@ input:
   # Default to 30s
   period: 30
 
+  # Defines the destination host.
+  # Default to `8.8.8.8`
   host: 8.8.8.8
 
   # Default to 64
