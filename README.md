@@ -8,6 +8,7 @@ Tracebeat is an [Elastic Beat](https://www.elastic.co/products/beats) that reads
 
 It uses [github.com/aeden/tracebeat](https://github.com/aeden/traceroute) for sending packets and tracing routes.
 
+v.1.0.0
 ## Configuration
 
 Adjust the `tracebeat.yml` configuration file to your needs.
