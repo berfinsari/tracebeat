@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // Package rpc provides support for parsing RPC messages and reporting the
 // results. This package supports the RPC v2 protocol as defined by RFC 5531
 // (RFC 1831).
@@ -15,7 +32,6 @@ import (
 
 	"github.com/elastic/beats/packetbeat/protos"
 	"github.com/elastic/beats/packetbeat/protos/tcp"
-	"github.com/elastic/beats/packetbeat/publish"
 )
 
 var debugf = logp.MakeDebug("rpc")
@@ -45,7 +61,7 @@ type rpc struct {
 	callsSeen          *common.Cache
 	transactionTimeout time.Duration
 
-	results publish.Transactions // Channel where results are pushed.
+	results protos.Reporter // Channel where results are pushed.
 }
 
 func init() {
@@ -54,7 +70,7 @@ func init() {
 
 func New(
 	testMode bool,
-	results publish.Transactions,
+	results protos.Reporter,
 	cfg *common.Config,
 ) (protos.Plugin, error) {
 	p := &rpc{}
@@ -73,7 +89,7 @@ func New(
 	return p, nil
 }
 
-func (r *rpc) init(results publish.Transactions, config *rpcConfig) error {
+func (r *rpc) init(results protos.Reporter, config *rpcConfig) error {
 	r.setFromConfig(config)
 	r.results = results
 	r.callsSeen = common.NewCacheWithRemovalListener(
@@ -200,7 +216,7 @@ func (r *rpc) handleRPCFragment(
 	for len(st.rawData) > 0 {
 
 		if len(st.rawData) < 4 {
-			debugf("Wainting for more data")
+			debugf("Waiting for more data")
 			break
 		}
 
@@ -209,7 +225,7 @@ func (r *rpc) handleRPCFragment(
 		islast := (marker & rpcLastFrag) != 0
 
 		if len(st.rawData)-4 < size {
-			debugf("Wainting for more data")
+			debugf("Waiting for more data")
 			break
 		}
 
@@ -229,7 +245,6 @@ func (r *rpc) handleRPCFragment(
 }
 
 func (r *rpc) handleRPCPacket(xdr *xdr, ts time.Time, tcptuple *common.TCPTuple, dir uint8) {
-
 	xid := fmt.Sprintf("%.8x", xdr.getUInt())
 
 	msgType := xdr.getUInt()

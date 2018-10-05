@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build !integration
 
 package mysql
@@ -6,22 +23,42 @@ import (
 	"encoding/hex"
 	"net"
 	"testing"
+	"time"
 
-	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/logp"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/elastic/beats/packetbeat/protos"
-	"github.com/elastic/beats/packetbeat/publish"
+	"github.com/elastic/beats/libbeat/beat"
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/logp"
 
-	"time"
+	"github.com/elastic/beats/packetbeat/protos"
+	"github.com/elastic/beats/packetbeat/protos/tcp"
 )
 
-func mysqlModForTests() *mysqlPlugin {
+const serverPort = 3306
+
+type eventStore struct {
+	events []beat.Event
+}
+
+func (e *eventStore) publish(event beat.Event) {
+	e.events = append(e.events, event)
+}
+
+func (e *eventStore) empty() bool {
+	return len(e.events) == 0
+}
+
+func mysqlModForTests(store *eventStore) *mysqlPlugin {
+	callback := func(beat.Event) {}
+	if store != nil {
+		callback = store.publish
+	}
+
 	var mysql mysqlPlugin
-	results := &publish.ChanTransactions{make(chan common.MapStr, 10)}
 	config := defaultConfig
-	mysql.init(results, &config)
+	config.Ports = []int{serverPort}
+	mysql.init(callback, &config)
 	return &mysql
 }
 
@@ -35,7 +72,6 @@ func Test_parseStateNames(t *testing.T) {
 }
 
 func TestMySQLParser_simpleRequest(t *testing.T) {
-
 	data := []byte(
 		"6f00000003494e5345525420494e544f20706f737" +
 			"42028757365726e616d652c207469746c652c2062" +
@@ -49,7 +85,7 @@ func TestMySQLParser_simpleRequest(t *testing.T) {
 		t.Errorf("Failed to decode hex string")
 	}
 
-	stream := &mysqlStream{data: message, message: new(mysqlMessage)}
+	stream := &mysqlStream{data: message, message: new(mysqlMessage), isClient: true}
 
 	ok, complete := mysqlMessageParser(stream)
 
@@ -71,7 +107,6 @@ func TestMySQLParser_simpleRequest(t *testing.T) {
 	}
 }
 func TestMySQLParser_OKResponse(t *testing.T) {
-
 	data := []byte(
 		"0700000100010401000000")
 
@@ -108,7 +143,6 @@ func TestMySQLParser_OKResponse(t *testing.T) {
 }
 
 func TestMySQLParser_errorResponse(t *testing.T) {
-
 	data := []byte(
 		"2e000001ff7a042334325330325461626c6520276d696e69747769742e706f737373742720646f65736e2774206578697374")
 
@@ -140,10 +174,8 @@ func TestMySQLParser_errorResponse(t *testing.T) {
 }
 
 func TestMySQLParser_dataResponse(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysqldetailed"})
-	}
-	mysql := mysqlModForTests()
+	logp.TestingSetup(logp.WithSelectors("mysqldetailed"))
+	mysql := mysqlModForTests(nil)
 
 	data := []byte(
 		"0100000105" +
@@ -208,9 +240,7 @@ func TestMySQLParser_dataResponse(t *testing.T) {
 }
 
 func TestMySQLParser_simpleUpdateResponse(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysqldetailed"))
 
 	data := []byte("300000010001000100000028526f7773206d6174636865643a203120204368616e6765643a203120205761726e696e67733a2030")
 
@@ -244,9 +274,7 @@ func TestMySQLParser_simpleUpdateResponse(t *testing.T) {
 }
 
 func TestMySQLParser_simpleUpdateResponseSplit(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
 	data1 := "300000010001000100000028526f7773206d6174636865"
 	data2 := "643a203120204368616e6765643a"
@@ -312,11 +340,9 @@ func TestMySQLParser_simpleUpdateResponseSplit(t *testing.T) {
 }
 
 func TestParseMySQL_simpleUpdateResponse(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
-	mysql := mysqlModForTests()
+	mysql := mysqlModForTests(nil)
 	data, err := hex.DecodeString("300000010001000100000028526f7773206d61746368" +
 		"65643a203120204368616e6765643a203120205761726e696e67733a2030")
 	if err != nil {
@@ -341,7 +367,7 @@ func TestParseMySQL_simpleUpdateResponse(t *testing.T) {
 		countHandleMysql++
 	}
 
-	mysql.Parse(&pkt, &tuple, 1, private)
+	mysql.Parse(&pkt, &tuple, tcp.TCPDirectionOriginal, private)
 
 	if countHandleMysql != 1 {
 		t.Errorf("handleMysql not called")
@@ -350,11 +376,9 @@ func TestParseMySQL_simpleUpdateResponse(t *testing.T) {
 
 // Test parsing three OK responses in the same packet
 func TestParseMySQL_threeResponses(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
-	mysql := mysqlModForTests()
+	mysql := mysqlModForTests(nil)
 
 	data, err := hex.DecodeString(
 		"0700000100000000000000" +
@@ -384,7 +408,7 @@ func TestParseMySQL_threeResponses(t *testing.T) {
 		countHandleMysql++
 	}
 
-	mysql.Parse(&pkt, &tuple, 1, private)
+	mysql.Parse(&pkt, &tuple, tcp.TCPDirectionOriginal, private)
 
 	if countHandleMysql != 3 {
 		t.Errorf("handleMysql not called three times")
@@ -393,11 +417,9 @@ func TestParseMySQL_threeResponses(t *testing.T) {
 
 // Test parsing one response split in two packets
 func TestParseMySQL_splitResponse(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
-	mysql := mysqlModForTests()
+	mysql := mysqlModForTests(nil)
 
 	data, err := hex.DecodeString(
 		"0100000105" +
@@ -428,7 +450,7 @@ func TestParseMySQL_splitResponse(t *testing.T) {
 		countHandleMysql++
 	}
 
-	private = mysql.Parse(&pkt, &tuple, 1, private).(mysqlPrivateData)
+	private = mysql.Parse(&pkt, &tuple, tcp.TCPDirectionOriginal, private).(mysqlPrivateData)
 	if countHandleMysql != 0 {
 		t.Errorf("handleMysql called on first run")
 	}
@@ -461,33 +483,34 @@ func TestParseMySQL_splitResponse(t *testing.T) {
 func testTCPTuple() *common.TCPTuple {
 	t := &common.TCPTuple{
 		IPLength: 4,
-		SrcIP:    net.IPv4(192, 168, 0, 1), DstIP: net.IPv4(192, 168, 0, 2),
-		SrcPort: 6512, DstPort: 3306,
+		BaseTuple: common.BaseTuple{
+			SrcIP: net.IPv4(192, 168, 0, 1), DstIP: net.IPv4(192, 168, 0, 2),
+			SrcPort: 6512, DstPort: serverPort,
+		},
 	}
-	t.ComputeHashebles()
+	t.ComputeHashables()
 	return t
 }
 
 // Helper function to read from the Publisher Queue
-func expectTransaction(t *testing.T, mysql *mysqlPlugin) common.MapStr {
-	client := mysql.results.(*publish.ChanTransactions)
-	select {
-	case trans := <-client.Channel:
-		return trans
-	default:
+func expectTransaction(t *testing.T, e *eventStore) common.MapStr {
+	if len(e.events) == 0 {
 		t.Error("No transaction")
+		return nil
 	}
-	return nil
+
+	event := e.events[0]
+	e.events = e.events[1:]
+	return event.Fields
 }
 
 // Test that loss of data during the response (but not at the beginning)
 // don't cause the whole transaction to be dropped.
 func Test_gap_in_response(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
-	mysql := mysqlModForTests()
+	store := &eventStore{}
+	mysql := mysqlModForTests(store)
 
 	// request and response from tests/pcaps/mysql_result_long.pcap
 	// select * from test
@@ -520,27 +543,25 @@ func Test_gap_in_response(t *testing.T) {
 
 	private := protos.ProtocolData(new(mysqlPrivateData))
 
-	private = mysql.Parse(&req, tcptuple, 0, private)
-	private = mysql.Parse(&resp, tcptuple, 1, private)
+	private = mysql.Parse(&req, tcptuple, tcp.TCPDirectionOriginal, private)
+	private = mysql.Parse(&resp, tcptuple, tcp.TCPDirectionReverse, private)
 
 	logp.Debug("mysql", "Now sending gap..")
 
-	_, drop := mysql.GapInStream(tcptuple, 1, 10, private)
+	_, drop := mysql.GapInStream(tcptuple, tcp.TCPDirectionReverse, 10, private)
 	assert.Equal(t, true, drop)
 
-	trans := expectTransaction(t, mysql)
+	trans := expectTransaction(t, store)
 	assert.NotNil(t, trans)
-	assert.Equal(t, trans["notes"], []string{"Packet loss while capturing the response"})
+	assert.Equal(t, []string{"Packet loss while capturing the response"}, trans["notes"])
 }
 
 // Test that loss of data during the request doesn't result in a
 // published transaction.
 func Test_gap_in_eat_message(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
-	mysql := mysqlModForTests()
+	mysql := mysqlModForTests(nil)
 
 	// request from tests/pcaps/mysql_result_long.pcap
 	// "select * from test". Last byte missing.
@@ -549,7 +570,7 @@ func Test_gap_in_eat_message(t *testing.T) {
 			"66726f6d20746573")
 	assert.Nil(t, err)
 
-	stream := &mysqlStream{data: reqData, message: new(mysqlMessage)}
+	stream := &mysqlStream{data: reqData, message: new(mysqlMessage), isClient: true}
 	ok, complete := mysqlMessageParser(stream)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, false, complete)
@@ -559,9 +580,7 @@ func Test_gap_in_eat_message(t *testing.T) {
 }
 
 func Test_read_length(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
 	var err error
 	var length int
@@ -578,11 +597,9 @@ func Test_read_length(t *testing.T) {
 }
 
 func Test_parseMysqlResponse_invalid(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"mysql", "mysqldetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("mysql", "mysqldetailed"))
 
-	mysql := mysqlModForTests()
+	mysql := mysqlModForTests(nil)
 
 	tests := [][]byte{
 		{},

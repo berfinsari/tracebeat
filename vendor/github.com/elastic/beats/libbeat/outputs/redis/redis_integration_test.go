@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build integration
 
 package redis
@@ -8,17 +25,19 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/garyburd/redigo/redis"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/common/fmtstr"
 	"github.com/elastic/beats/libbeat/outputs"
+	"github.com/elastic/beats/libbeat/outputs/outest"
 
-	_ "github.com/elastic/beats/libbeat/outputs/codecs/format"
-	_ "github.com/elastic/beats/libbeat/outputs/codecs/json"
+	_ "github.com/elastic/beats/libbeat/outputs/codec/format"
+	_ "github.com/elastic/beats/libbeat/outputs/codec/json"
 )
 
 const (
@@ -29,97 +48,11 @@ const (
 	SRedisDefaultPort = "6380"
 )
 
-func TestTopologyInRedisTCP(t *testing.T) {
-	db := 1
-	key := "test_topo_tcp"
-	redisHosts := []string{getRedisAddr()}
-	redisConfig := map[string]interface{}{
-		"hosts":         redisHosts,
-		"key":           key,
-		"host_topology": redisHosts[0],
-		"db_topology":   db,
-		"timeout":       "5s",
-	}
-
-	testTopologyInRedis(t, redisConfig)
-}
-
-func TestTopologyInRedisTLS(t *testing.T) {
-	db := 1
-	key := "test_topo_tls"
-	redisHosts := []string{getSRedisAddr()}
-	redisConfig := map[string]interface{}{
-		"hosts":         redisHosts,
-		"key":           key,
-		"host_topology": redisHosts[0],
-		"db_topology":   db,
-		"timeout":       "5s",
-
-		"ssl.verification_mode": "full",
-		"ssl.certificate_authorities": []string{
-			"../../../testing/environments/docker/sredis/pki/tls/certs/sredis.crt",
-		},
-	}
-
-	testTopologyInRedis(t, redisConfig)
-}
-
-func testTopologyInRedis(t *testing.T, cfg map[string]interface{}) {
-	tests := []struct {
-		out  *redisOut
-		name string
-		ips  []string
-	}{
-		{nil, "proxy1", []string{"10.1.0.4"}},
-		{nil, "proxy2", []string{"10.1.0.9", "fe80::4e8d:79ff:fef2:de6a"}},
-		{nil, "proxy3", []string{"10.1.0.10"}},
-	}
-
-	db := 0
-	key := cfg["key"].(string)
-	if v, ok := cfg["db_topology"]; ok {
-		db = v.(int)
-	}
-
-	// prepare redis
-	{
-		conn, err := redis.Dial("tcp", getRedisAddr(), redis.DialDatabase(db))
-		if err != nil {
-			t.Fatalf("redis.Dial failed %v", err)
-		}
-		// delete old key if present
-		defer conn.Close()
-		conn.Do("DEL", key)
-	}
-
-	// 1. connect
-	for i := range tests {
-		tests[i].out = newRedisTestingOutput(t, cfg)
-		defer tests[i].out.Close()
-	}
-
-	// 2. publish ips twice (so all outputs have same topology map)
-	for i := 0; i < 2; i++ {
-		for _, test := range tests {
-			t.Logf("publish %v ips: %v", test.name, test.ips)
-			err := test.out.PublishIPs(test.name, test.ips)
-			assert.NoError(t, err)
-		}
-	}
-
-	// 3. check names available
-	for _, test := range tests {
-		t.Logf("check %v knows ips", test.name)
-		for _, other := range tests {
-			t.Logf("  check ips of %v", other.name)
-			for _, ip := range other.ips {
-				name := test.out.GetNameByIP(ip)
-				t.Logf("  check ip: %v -> %v", ip, other.name == name)
-				assert.Equal(t, other.name, name)
-			}
-		}
-	}
-}
+const (
+	testBeatname    = "libbeat"
+	testBeatversion = "1.2.3"
+	testMetaValue   = "private"
+)
 
 func TestPublishListTCP(t *testing.T) {
 	key := "test_publist_tcp"
@@ -190,6 +123,10 @@ func testPublishList(t *testing.T, cfg map[string]interface{}) {
 		assert.NoError(t, err)
 		assert.Equal(t, i+1, evt.Message)
 	}
+
+	for _, raw := range results {
+		validateMeta(t, raw)
+	}
 }
 
 func TestPublishChannelTCP(t *testing.T) {
@@ -226,6 +163,7 @@ func TestPublishChannelTLS(t *testing.T) {
 }
 
 func TestPublishChannelTCPWithFormatting(t *testing.T) {
+	t.Skip("format string not yet supported")
 	db := 0
 	key := "test_pubchan_tcp"
 	redisConfig := map[string]interface{}{
@@ -303,16 +241,23 @@ func testPublishChannel(t *testing.T, cfg map[string]interface{}) {
 	assert.Equal(t, total, len(messages))
 	for i, raw := range messages {
 		evt := struct{ Message int }{}
-		if fmt, hasFmt := cfg["codec.format.string"]; hasFmt {
-			fmtString := fmtstr.MustCompileEvent(fmt.(string))
-			expectedMessage, _ := fmtString.Run(createEvent(i + 1))
-			assert.NoError(t, err)
-			assert.Equal(t, string(expectedMessage), string(raw))
+		if _, hasFmt := cfg["codec.format.string"]; hasFmt {
+			t.Fatal("format string not yet supported")
+			/*
+				fmtString := fmtstr.MustCompileEvent(fmt.(string))
+				expectedMessage, _ := fmtString.Run(createEvent(i + 1))
+				assert.NoError(t, err)
+				assert.Equal(t, string(expectedMessage), string(raw))
+			*/
 		} else {
 			err = json.Unmarshal(raw, &evt)
 			assert.NoError(t, err)
 			assert.Equal(t, i+1, evt.Message)
 		}
+	}
+
+	for _, raw := range messages {
+		validateMeta(t, raw)
 	}
 }
 
@@ -335,43 +280,41 @@ func getSRedisAddr() string {
 		getEnv("SREDIS_PORT", SRedisDefaultPort))
 }
 
-func newRedisTestingOutput(t *testing.T, cfg map[string]interface{}) *redisOut {
-	params := struct {
-		Expire int `config:"topology_expire"`
-	}{15}
-
+func newRedisTestingOutput(t *testing.T, cfg map[string]interface{}) outputs.Client {
 	config, err := common.NewConfigFrom(cfg)
 	if err != nil {
 		t.Fatalf("Error reading config: %v", err)
 	}
 
-	plugin := outputs.FindOutputPlugin("redis")
+	plugin := outputs.FindFactory("redis")
 	if plugin == nil {
 		t.Fatalf("redis output module not registered")
 	}
 
-	if err := config.Unpack(&params); err != nil {
-		t.Fatalf("Failed to unpack topology_expire: %v", err)
-	}
-
-	out, err := plugin("libbeat", config, params.Expire)
+	out, err := plugin(beat.Info{Beat: testBeatname, Version: testBeatversion}, outputs.NewNilObserver(), config)
 	if err != nil {
 		t.Fatalf("Failed to initialize redis output: %v", err)
 	}
 
-	return out.(*redisOut)
+	client := out.Clients[0].(outputs.NetworkClient)
+	if err := client.Connect(); err != nil {
+		t.Fatalf("Failed to connect to redis host: %v", err)
+	}
+
+	return client
 }
 
-func sendTestEvents(out *redisOut, batches, N int) error {
+func sendTestEvents(out outputs.Client, batches, N int) error {
 	i := 1
 	for b := 0; b < batches; b++ {
-		batch := make([]outputs.Data, N)
-		for n := range batch {
-			batch[n] = outputs.Data{Event: createEvent(i)}
+		events := make([]beat.Event, N)
+		for n := range events {
+			events[n] = createEvent(i)
 			i++
 		}
 
-		err := out.BulkPublish(nil, outputs.Options{}, batch[:])
+		batch := outest.NewBatch(events...)
+		err := out.Publish(batch)
 		if err != nil {
 			return err
 		}
@@ -380,6 +323,34 @@ func sendTestEvents(out *redisOut, batches, N int) error {
 	return nil
 }
 
-func createEvent(message int) common.MapStr {
-	return common.MapStr{"message": message}
+func createEvent(message int) beat.Event {
+	return beat.Event{
+		Timestamp: time.Now(),
+		Meta: common.MapStr{
+			"test": testMetaValue,
+		},
+		Fields: common.MapStr{"message": message},
+	}
+}
+
+func validateMeta(t *testing.T, raw []byte) {
+	// require metadata
+	type meta struct {
+		Beat    string `struct:"beat"`
+		Version string `struct:"version"`
+		Test    string `struct:"test"`
+	}
+
+	evt := struct {
+		Meta meta `json:"@metadata"`
+	}{}
+	err := json.Unmarshal(raw, &evt)
+	if err != nil {
+		t.Errorf("failed to unmarshal meta section: %v", err)
+		return
+	}
+
+	assert.Equal(t, testBeatname, evt.Meta.Beat)
+	assert.Equal(t, testBeatversion, evt.Meta.Version)
+	assert.Equal(t, testMetaValue, evt.Meta.Test)
 }

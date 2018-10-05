@@ -1,9 +1,28 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package collector
 
 import (
+	"fmt"
+
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/metricbeat/helper"
+	"github.com/elastic/beats/libbeat/common/cfgwarn"
+	p "github.com/elastic/beats/metricbeat/helper/prometheus"
 	"github.com/elastic/beats/metricbeat/mb"
 	"github.com/elastic/beats/metricbeat/mb/parse"
 )
@@ -22,19 +41,20 @@ var (
 )
 
 func init() {
-	if err := mb.Registry.AddMetricSet("prometheus", "collector", New, hostParser); err != nil {
-		panic(err)
-	}
+	mb.Registry.MustAddMetricSet("prometheus", "collector", New,
+		mb.WithHostParser(hostParser),
+		mb.DefaultMetricSet(),
+	)
 }
 
 type MetricSet struct {
 	mb.BaseMetricSet
-	http      *helper.HTTP
-	namespace string
+	prometheus p.Prometheus
+	namespace  string
 }
 
 func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
-	logp.Warn("BETA: The prometheus collector metricset is beta")
+	cfgwarn.Beta("The prometheus collector metricset is beta")
 
 	config := struct {
 		Namespace string `config:"namespace" validate:"required"`
@@ -44,51 +64,48 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 		return nil, err
 	}
 
+	prometheus, err := p.NewPrometheusClient(base)
+	if err != nil {
+		return nil, err
+	}
+
 	return &MetricSet{
 		BaseMetricSet: base,
-		http:          helper.NewHTTP(base),
+		prometheus:    prometheus,
 		namespace:     config.Namespace,
 	}, nil
 }
 
 func (m *MetricSet) Fetch() ([]common.MapStr, error) {
+	families, err := m.prometheus.GetFamilies()
 
-	scanner, err := m.http.FetchScanner()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Unable to decode response from prometheus endpoint")
 	}
+
 	eventList := map[string]common.MapStr{}
 
-	// Iterate through all events to gather data
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Skip comment lines
-		if line[0] == '#' {
-			continue
-		}
+	for _, family := range families {
+		promEvents := GetPromEventsFromMetricFamily(family)
 
-		promEvent := NewPromEvent(line)
-		if promEvent.value == nil {
-			continue
-		}
+		for _, promEvent := range promEvents {
+			if _, ok := eventList[promEvent.labelHash]; !ok {
+				eventList[promEvent.labelHash] = common.MapStr{}
 
-		// If MapString for this label group does not exist yet, it is created
-		if _, ok := eventList[promEvent.labelHash]; !ok {
-			eventList[promEvent.labelHash] = common.MapStr{}
-
-			// Add labels
-			if len(promEvent.labels) > 0 {
-				eventList[promEvent.labelHash]["label"] = promEvent.labels
+				// Add labels
+				if len(promEvent.labels) > 0 {
+					eventList[promEvent.labelHash]["label"] = promEvent.labels
+				}
 			}
 
+			eventList[promEvent.labelHash][promEvent.key] = promEvent.value
 		}
-		eventList[promEvent.labelHash][promEvent.key] = promEvent.value
 	}
 
 	// Converts hash list to slice
 	events := []common.MapStr{}
 	for _, e := range eventList {
-		e["_namespace"] = m.namespace
+		e[mb.NamespaceKey] = m.namespace
 		events = append(events, e)
 	}
 

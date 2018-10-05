@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package partition
 
 import (
@@ -5,8 +22,9 @@ import (
 	"errors"
 
 	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/common/cfgwarn"
+	"github.com/elastic/beats/libbeat/common/transport/tlscommon"
 	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/libbeat/outputs"
 	"github.com/elastic/beats/metricbeat/mb"
 	"github.com/elastic/beats/metricbeat/mb/parse"
 	"github.com/elastic/beats/metricbeat/module/kafka"
@@ -16,9 +34,10 @@ import (
 
 // init registers the partition MetricSet with the central registry.
 func init() {
-	if err := mb.Registry.AddMetricSet("kafka", "partition", New, parse.PassThruHostParser); err != nil {
-		panic(err)
-	}
+	mb.Registry.MustAddMetricSet("kafka", "partition", New,
+		mb.WithHostParser(parse.PassThruHostParser),
+		mb.DefaultMetricSet(),
+	)
 }
 
 // MetricSet type defines all fields of the partition MetricSet
@@ -37,7 +56,7 @@ var debugf = logp.MakeDebug("kafka")
 
 // New creates a new instance of the partition MetricSet.
 func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
-	logp.Warn("BETA: The kafka partition metricset is beta")
+	cfgwarn.Beta("The kafka partition metricset is beta")
 
 	config := defaultConfig
 	if err := base.Module().UnpackConfig(&config); err != nil {
@@ -45,7 +64,7 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 	}
 
 	var tls *tls.Config
-	tlsCfg, err := outputs.LoadTLSConfig(config.TLS)
+	tlsCfg, err := tlscommon.LoadTLSConfig(config.TLS)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +83,7 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 		TLS:         tls,
 		Username:    config.Username,
 		Password:    config.Password,
+		Version:     kafka.Version("0.8.2.0"),
 	}
 
 	return &MetricSet{
@@ -79,22 +99,23 @@ func (m *MetricSet) connect() (*kafka.Broker, error) {
 }
 
 // Fetch partition stats list from kafka
-func (m *MetricSet) Fetch() ([]common.MapStr, error) {
+func (m *MetricSet) Fetch(r mb.ReporterV2) {
 	b, err := m.connect()
 	if err != nil {
-		return nil, err
+		r.Error(err)
+		return
 	}
 
 	defer b.Close()
 	topics, err := b.GetTopicsMetadata(m.topics...)
 	if err != nil {
-		return nil, err
+		r.Error(err)
+		return
 	}
 
-	events := []common.MapStr{}
 	evtBroker := common.MapStr{
 		"id":      b.ID(),
-		"address": b.Addr(),
+		"address": b.AdvertisedAddr(),
 	}
 
 	for _, topic := range topics {
@@ -136,6 +157,7 @@ func (m *MetricSet) Fetch() ([]common.MapStr, error) {
 					"id":             partition.ID,
 					"leader":         partition.Leader,
 					"replica":        id,
+					"is_leader":      partition.Leader == id,
 					"insync_replica": hasID(id, partition.Isr),
 				}
 
@@ -156,12 +178,20 @@ func (m *MetricSet) Fetch() ([]common.MapStr, error) {
 					},
 				}
 
-				events = append(events, event)
+				// TODO (deprecation): Remove fields from MetricSetFields moved to ModuleFields
+				r.Event(mb.Event{
+					ModuleFields: common.MapStr{
+						"broker": evtBroker,
+						"topic":  evtTopic,
+						"partition": common.MapStr{
+							"id": partition.ID,
+						},
+					},
+					MetricSetFields: event,
+				})
 			}
 		}
 	}
-
-	return events, nil
 }
 
 // queryOffsetRange queries the broker for the oldest and the newest offsets in

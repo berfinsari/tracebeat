@@ -1,6 +1,8 @@
-== kafka Module
+This is the Kafka module.
 
-beta[]
+The default metricsets are `consumergroup` and `partition`.
 
-This is the kafka Module.
+[float]
+=== Compability
 
+This module is tested with Kafka 0.10.2.1, 1.1.0 and 2.0.0.

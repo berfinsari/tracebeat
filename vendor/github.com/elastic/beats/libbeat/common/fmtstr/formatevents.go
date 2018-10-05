@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package fmtstr
 
 import (
@@ -10,13 +27,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/common/dtfmt"
 	"github.com/elastic/beats/libbeat/logp"
 )
 
 // EventFormatString implements format string support on events
-// of type common.MapStr.
+// of type beat.Event.
 //
 // The concrete event expansion requires the field name enclosed by brackets.
 // For example: '%{[field.name]}'. Field names can be separated by points or
@@ -89,7 +107,7 @@ func releaseCtx(c *eventEvalContext) {
 	eventCtxPool.Put(c)
 }
 
-// MustCompileEvent copmiles an event format string into an runnable
+// MustCompileEvent compiles an event format string into an runnable
 // EventFormatString. Generates a panic if compilation fails.
 func MustCompileEvent(in string) *EventFormatString {
 	fs, err := CompileEvent(in)
@@ -170,7 +188,7 @@ func (fs *EventFormatString) Fields() []string {
 
 // Run executes the format string returning a new expanded string or an error
 // if execution or event field expansion fails.
-func (fs *EventFormatString) Run(event common.MapStr) (string, error) {
+func (fs *EventFormatString) Run(event *beat.Event) (string, error) {
 	ctx := newEventCtx(len(fs.fields))
 	defer releaseCtx(ctx)
 
@@ -192,7 +210,7 @@ func (fs *EventFormatString) Run(event common.MapStr) (string, error) {
 
 // RunBytes executes the format string returning a new expanded string of type
 // `[]byte` or an error if execution or event field expansion fails.
-func (fs *EventFormatString) RunBytes(event common.MapStr) ([]byte, error) {
+func (fs *EventFormatString) RunBytes(event *beat.Event) ([]byte, error) {
 	ctx := newEventCtx(len(fs.fields))
 	defer releaseCtx(ctx)
 
@@ -208,7 +226,7 @@ func (fs *EventFormatString) RunBytes(event common.MapStr) ([]byte, error) {
 }
 
 // Eval executes the format string, writing the resulting string into the provided output buffer. Returns error if execution or event field expansion fails.
-func (fs *EventFormatString) Eval(out *bytes.Buffer, event common.MapStr) error {
+func (fs *EventFormatString) Eval(out *bytes.Buffer, event *beat.Event) error {
 	ctx := newEventCtx(len(fs.fields))
 	defer releaseCtx(ctx)
 
@@ -227,7 +245,7 @@ func (fs *EventFormatString) IsConst() bool {
 // of strings.
 func (fs *EventFormatString) collectFields(
 	ctx *eventEvalContext,
-	event common.MapStr,
+	event *beat.Event,
 ) error {
 	for _, fi := range fs.fields {
 		s, err := fieldString(event, fi.path)
@@ -242,19 +260,7 @@ func (fs *EventFormatString) collectFields(
 	}
 
 	if fs.timestamp {
-		timestamp, found := event["@timestamp"]
-		if !found {
-			return errors.New("missing timestamp")
-		}
-
-		switch t := timestamp.(type) {
-		case common.Time:
-			ctx.ts = time.Time(t)
-		case time.Time:
-			ctx.ts = t
-		default:
-			return errors.New("unknown timestamp type")
-		}
+		ctx.ts = event.Timestamp
 	}
 
 	return nil
@@ -398,7 +404,7 @@ func parseEventPath(field string) (string, error) {
 }
 
 // TODO: move to libbeat/common?
-func fieldString(event common.MapStr, field string) (string, error) {
+func fieldString(event *beat.Event, field string) (string, error) {
 	v, err := event.GetValue(field)
 	if err != nil {
 		return "", err
@@ -422,6 +428,8 @@ func tryConvString(v interface{}) (string, error) {
 		return s, nil
 	case common.Time:
 		return s.String(), nil
+	case time.Time:
+		return common.Time(s).String(), nil
 	case []byte:
 		return string(s), nil
 	case stringer:

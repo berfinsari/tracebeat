@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build !integration
 
 package thrift
@@ -20,10 +37,7 @@ func thriftForTests() *thriftPlugin {
 }
 
 func TestThrift_thriftReadString(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	var data []byte
 	var ok, complete bool
@@ -58,10 +72,7 @@ func TestThrift_thriftReadString(t *testing.T) {
 }
 
 func TestThrift_readMessageBegin(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	var data []byte
 	var ok, complete bool
@@ -142,14 +153,10 @@ func TestThrift_readMessageBegin(t *testing.T) {
 	if !ok || complete {
 		t.Error("Bad result:", ok, complete)
 	}
-
 }
 
 func TestThrift_thriftReadField(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	var data []byte
 	var ok, complete bool
@@ -405,14 +412,10 @@ func TestThrift_thriftReadField(t *testing.T) {
 			t.Error("Bad values:", field.id, field.Type, field.value)
 		}
 	}
-
 }
 
 func TestThrift_thriftMessageParser(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	var data []byte
 	var stream thriftStream
@@ -587,18 +590,17 @@ func expectThriftTransaction(t *testing.T, thrift *thriftPlugin) *thriftTransact
 func testTCPTuple() *common.TCPTuple {
 	t := &common.TCPTuple{
 		IPLength: 4,
-		SrcIP:    net.IPv4(192, 168, 0, 1), DstIP: net.IPv4(192, 168, 0, 2),
-		SrcPort: 9200, DstPort: 9201,
+		BaseTuple: common.BaseTuple{
+			SrcIP: net.IPv4(192, 168, 0, 1), DstIP: net.IPv4(192, 168, 0, 2),
+			SrcPort: 9200, DstPort: 9201,
+		},
 	}
-	t.ComputeHashebles()
+	t.ComputeHashables()
 	return t
 }
 
 func TestThrift_ParseSimpleTBinary(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.publishQueue = make(chan *thriftTransaction, 10)
@@ -623,10 +625,7 @@ func TestThrift_ParseSimpleTBinary(t *testing.T) {
 }
 
 func TestThrift_ParseSimpleTFramed(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -650,14 +649,10 @@ func TestThrift_ParseSimpleTFramed(t *testing.T) {
 
 		t.Error("Bad result:", trans)
 	}
-
 }
 
 func TestThrift_ParseSimpleTFramedSplit(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -684,14 +679,10 @@ func TestThrift_ParseSimpleTFramedSplit(t *testing.T) {
 
 		t.Error("Bad result:", trans)
 	}
-
 }
 
 func TestThrift_ParseSimpleTFramedSplitInterleaved(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -721,10 +712,7 @@ func TestThrift_ParseSimpleTFramedSplitInterleaved(t *testing.T) {
 }
 
 func TestThrift_Parse_OneWayCallWithFin(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -748,9 +736,8 @@ func TestThrift_Parse_OneWayCallWithFin(t *testing.T) {
 }
 
 func TestThrift_Parse_OneWayCall2Requests(t *testing.T) {
-
 	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
+		logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 	}
 
 	thrift := thriftForTests()
@@ -787,10 +774,7 @@ func TestThrift_Parse_OneWayCall2Requests(t *testing.T) {
 }
 
 func TestThrift_Parse_RequestReplyMismatch(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -815,10 +799,7 @@ func TestThrift_Parse_RequestReplyMismatch(t *testing.T) {
 }
 
 func TestThrift_ParseSimpleTFramed_NoReply(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -857,10 +838,7 @@ func TestThrift_ParseSimpleTFramed_NoReply(t *testing.T) {
 }
 
 func TestThrift_ParseObfuscateStrings(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -888,10 +866,7 @@ func TestThrift_ParseObfuscateStrings(t *testing.T) {
 }
 
 func BenchmarkThrift_ParseSkipReply(b *testing.B) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -934,10 +909,7 @@ func BenchmarkThrift_ParseSkipReply(b *testing.B) {
 }
 
 func TestThrift_Parse_Exception(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.publishQueue = make(chan *thriftTransaction, 10)
@@ -964,10 +936,7 @@ func TestThrift_Parse_Exception(t *testing.T) {
 }
 
 func TestThrift_ParametersNames(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.TransportType = thriftTFramed
@@ -997,14 +966,10 @@ func TestThrift_ParametersNames(t *testing.T) {
 
 		t.Error("Bad result:", trans)
 	}
-
 }
 
 func TestThrift_ExceptionName(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.idl = thriftIdlForTesting(t, `
@@ -1043,10 +1008,7 @@ func TestThrift_ExceptionName(t *testing.T) {
 }
 
 func TestThrift_GapInStream_response(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.idl = thriftIdlForTesting(t, `
@@ -1094,10 +1056,7 @@ func TestThrift_GapInStream_response(t *testing.T) {
 }
 
 func TestThrift_GapInStream_request(t *testing.T) {
-
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"thrift", "thriftdetailed"})
-	}
+	logp.TestingSetup(logp.WithSelectors("thrift", "thriftdetailed"))
 
 	thrift := thriftForTests()
 	thrift.idl = thriftIdlForTesting(t, `

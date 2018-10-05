@@ -3,7 +3,7 @@
 Welcome to {Beat}.
 
 Ensure that this folder is at the following location:
-`${GOPATH}/{beat_path}`
+`${GOPATH}/src/{beat_path}`
 
 ## Getting Started with {Beat}
 
@@ -70,8 +70,7 @@ The test coverage is reported in the folder `./build/coverage/`
 ### Update
 
 Each beat has a template for the mapping in elasticsearch and a documentation for the fields
-which is automatically generated based on `etc/fields.yml`.
-To generate etc/{beat}.template.json and etc/{beat}.asciidoc
+which is automatically generated based on `fields.yml` by running the following command.
 
 ```
 make update
@@ -99,9 +98,8 @@ make clean
 To clone {Beat} from the git repository, run the following commands:
 
 ```
-mkdir -p ${GOPATH}/{beat_path}
-cd ${GOPATH}/{beat_path}
-git clone https://{beat_path}
+mkdir -p ${GOPATH}/src/{beat_path}
+git clone https://{beat_path} ${GOPATH}/src/{beat_path}
 ```
 
 
@@ -113,7 +111,7 @@ For further development, check out the [beat developer guide](https://www.elasti
 The beat frameworks provides tools to crosscompile and package your beat for different platforms. This requires [docker](https://www.docker.com/) and vendoring as described above. To build packages of your beat, run the following command:
 
 ```
-make package
+make release
 ```
 
-This will fetch and create all images required for the build process. The hole process to finish can take several minutes.
+This will fetch and create all images required for the build process. The whole process to finish can take several minutes.

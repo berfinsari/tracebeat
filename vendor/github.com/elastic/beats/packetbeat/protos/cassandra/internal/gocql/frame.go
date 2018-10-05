@@ -1,16 +1,30 @@
-// Copyright (c) 2012 The gocql Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
 
 package cassandra
 
 import (
 	"errors"
 	"fmt"
-	"github.com/elastic/beats/libbeat/common/streambuf"
-	"github.com/elastic/beats/libbeat/logp"
 	"runtime"
 	"sync"
+
+	"github.com/elastic/beats/libbeat/common/streambuf"
+	"github.com/elastic/beats/libbeat/logp"
 )
 
 var (
@@ -65,7 +79,6 @@ type Framer struct {
 }
 
 func NewFramer(r *streambuf.Buffer, compressor Compressor) *Framer {
-
 	f := framerPool.Get().(*Framer)
 	f.compres = compressor
 	f.r = r
@@ -154,7 +167,6 @@ func (f *Framer) ReadHeader() (head *frameHeader, err error) {
 
 // reads a frame form the wire into the framers buffer
 func (f *Framer) ReadFrame() (data map[string]interface{}, err error) {
-
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
@@ -256,7 +268,6 @@ func (f *Framer) ReadFrame() (data map[string]interface{}, err error) {
 }
 
 func (f *Framer) parseErrorFrame() (data map[string]interface{}) {
-
 	decoder := f.decoder
 	code := decoder.ReadInt()
 	msg := decoder.ReadString()
@@ -350,14 +361,12 @@ func (f *Framer) parseErrorFrame() (data map[string]interface{}) {
 }
 
 func (f *Framer) parseSupportedFrame() (data map[string]interface{}) {
-
 	data = make(map[string]interface{})
 	data["supported"] = (f.decoder).ReadStringMultiMap()
 	return data
 }
 
 func (f *Framer) parseResultMetadata(getPKinfo bool) map[string]interface{} {
-
 	decoder := f.decoder
 	meta := make(map[string]interface{})
 	flags := decoder.ReadInt()
@@ -406,7 +415,6 @@ func (f *Framer) parseQueryFrame() (data map[string]interface{}) {
 }
 
 func (f *Framer) parseResultFrame() (data map[string]interface{}) {
-
 	kind := (f.decoder).ReadInt()
 
 	data = make(map[string]interface{})
@@ -431,7 +439,6 @@ func (f *Framer) parseResultFrame() (data map[string]interface{}) {
 }
 
 func (f *Framer) parseResultRows() map[string]interface{} {
-
 	result := make(map[string]interface{})
 	result["meta"] = f.parseResultMetadata(false)
 	result["num_rows"] = (f.decoder).ReadInt()
@@ -440,7 +447,6 @@ func (f *Framer) parseResultRows() map[string]interface{} {
 }
 
 func (f *Framer) parseResultPrepared() map[string]interface{} {
-
 	result := make(map[string]interface{})
 
 	uuid, err := UUIDFromBytes((f.decoder).ReadShortBytes())
@@ -519,7 +525,6 @@ func (f *Framer) parseAuthChallengeFrame() (data map[string]interface{}) {
 }
 
 func (f *Framer) parseEventFrame() (data map[string]interface{}) {
-
 	data = make((map[string]interface{}))
 	decoder := f.decoder
 	eventType := decoder.ReadString()

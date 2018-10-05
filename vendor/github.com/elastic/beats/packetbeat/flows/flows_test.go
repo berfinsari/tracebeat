@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build !integration
 
 package flows
@@ -7,25 +24,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/packetbeat/config"
-	"github.com/stretchr/testify/assert"
 )
 
 type flowsChan struct {
-	ch chan []common.MapStr
+	ch chan []beat.Event
 }
 
-func (f *flowsChan) PublishFlows(events []common.MapStr) bool {
+func (f *flowsChan) PublishFlows(events []beat.Event) {
 	f.ch <- events
-	return true
 }
 
 func TestFlowsCounting(t *testing.T) {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"*"})
-	}
+	logp.TestingSetup()
+
 	mac1 := []byte{1, 2, 3, 4, 5, 6}
 	mac2 := []byte{6, 5, 4, 3, 2, 1}
 	ip1 := []byte{127, 0, 0, 1}
@@ -45,14 +62,14 @@ func TestFlowsCounting(t *testing.T) {
 
 	assert.NoError(t, err)
 
-	pub := &flowsChan{make(chan []common.MapStr, 1)}
+	pub := &flowsChan{make(chan []beat.Event, 1)}
 
 	processor := &flowsProcessor{
 		table:    module.table,
 		counters: module.counterReg,
 		timeout:  20 * time.Millisecond,
 	}
-	processor.spool.init(pub, 1)
+	processor.spool.init(pub.PublishFlows, 1)
 
 	worker, err := makeWorker(
 		processor,
@@ -101,7 +118,7 @@ func TestFlowsCounting(t *testing.T) {
 		module.Unlock()
 	}
 
-	var events []common.MapStr
+	var events []beat.Event
 	select {
 	case events = <-pub.ch:
 	case <-time.After(5 * time.Second):
@@ -110,7 +127,7 @@ func TestFlowsCounting(t *testing.T) {
 	if events == nil {
 		t.Fatalf("no event received in time")
 	}
-	event := events[0]
+	event := events[0].Fields
 	t.Logf("event: %v", event)
 
 	source := event["source"].(common.MapStr)

@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package pgsql
 
 import (
@@ -238,7 +255,6 @@ func (pgsql *pgsqlPlugin) parseCommandComplete(s *pgsqlStream, length int) (bool
 }
 
 func (pgsql *pgsqlPlugin) parseReadyForQuery(s *pgsqlStream, length int) (bool, bool) {
-
 	// ReadyForQuery -> backend ready for a new query cycle
 	m := s.message
 	m.start = s.parseOffset
@@ -319,7 +335,6 @@ func (pgsql *pgsqlPlugin) parseExtResp(s *pgsqlStream, length int) (bool, bool) 
 }
 
 func (pgsql *pgsqlPlugin) parseSkipMessage(s *pgsqlStream, length int) (bool, bool) {
-
 	// TODO: add info from NoticeResponse in case there are warning messages for a query
 	// ignore command
 	s.parseOffset++ //type
@@ -379,6 +394,9 @@ func pgsqlFieldsParser(s *pgsqlStream, buf []byte) error {
 		off += 4
 
 		// read format (int16)
+		if len(buf) < off+2 {
+			return errFieldBufferShort
+		}
 		format := common.BytesNtohs(buf[off : off+2])
 		off += 2
 		fieldsFormat = append(fieldsFormat, byte(format))
@@ -639,7 +657,6 @@ func (pgsql *pgsqlPlugin) parseMessageExtendedQuery(s *pgsqlStream) (bool, bool)
 }
 
 func isSpecialPgsqlCommand(data []byte) (bool, int, int) {
-
 	if len(data) < 8 {
 		// 8 bytes required
 		return false, 0, 0

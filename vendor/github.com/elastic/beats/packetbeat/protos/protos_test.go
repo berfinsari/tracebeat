@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build !integration
 
 package protos
@@ -7,7 +24,6 @@ import (
 	"time"
 
 	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/packetbeat/publish"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -18,7 +34,7 @@ type TestProtocol struct {
 
 type TCPProtocol TestProtocol
 
-func (proto *TCPProtocol) Init(testMode bool, results publish.Transactions) error {
+func (proto *TCPProtocol) Init(testMode bool, results Reporter) error {
 	return nil
 }
 
@@ -45,7 +61,7 @@ func (proto *TCPProtocol) ConnectionTimeout() time.Duration { return 0 }
 
 type UDPProtocol TestProtocol
 
-func (proto *UDPProtocol) Init(testMode bool, results publish.Transactions) error {
+func (proto *UDPProtocol) Init(testMode bool, results Reporter) error {
 	return nil
 }
 
@@ -59,7 +75,7 @@ func (proto *UDPProtocol) ParseUDP(pkt *Packet) {
 
 type TCPUDPProtocol TestProtocol
 
-func (proto *TCPUDPProtocol) Init(testMode bool, results publish.Transactions) error {
+func (proto *TCPUDPProtocol) Init(testMode bool, results Reporter) error {
 	return nil
 }
 
@@ -95,7 +111,7 @@ func TestProtocolNames(t *testing.T) {
 
 func newProtocols() Protocols {
 	p := ProtocolsStruct{}
-	p.all = make(map[Protocol]Plugin)
+	p.all = make(map[Protocol]protocolInstance)
 	p.tcp = make(map[Protocol]TCPPlugin)
 	p.udp = make(map[Protocol]UDPPlugin)
 
@@ -103,15 +119,15 @@ func newProtocols() Protocols {
 	udp := &UDPProtocol{Ports: []int{5060}}
 	tcpUDP := &TCPUDPProtocol{Ports: []int{53}}
 
-	p.register(1, tcp)
-	p.register(2, udp)
-	p.register(3, tcpUDP)
+	p.register(1, nil, tcp)
+	p.register(2, nil, udp)
+	p.register(3, nil, tcpUDP)
 	return p
 }
 
 func TestBpfFilterWithoutVlanOnlyIcmp(t *testing.T) {
 	p := ProtocolsStruct{}
-	p.all = make(map[Protocol]Plugin)
+	p.all = make(map[Protocol]protocolInstance)
 	p.tcp = make(map[Protocol]TCPPlugin)
 	p.udp = make(map[Protocol]UDPPlugin)
 
@@ -143,14 +159,6 @@ func TestBpfFilterWithVlanWithIcmp(t *testing.T) {
 	filter := p.BpfFilter(true, true)
 	assert.Equal(t, "tcp port 80 or udp port 5060 or port 53 or icmp or icmp6 or "+
 		"(vlan and (tcp port 80 or udp port 5060 or port 53 or icmp or icmp6))", filter)
-}
-
-func TestGetAll(t *testing.T) {
-	p := newProtocols()
-	all := p.GetAll()
-	assert.NotNil(t, all[1])
-	assert.NotNil(t, all[2])
-	assert.NotNil(t, all[3])
 }
 
 func TestGetAllTCP(t *testing.T) {

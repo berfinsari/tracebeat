@@ -1,17 +1,34 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package mongodb
 
 import (
-	"expvar"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/libbeat/monitoring"
 	"github.com/elastic/beats/packetbeat/procs"
 	"github.com/elastic/beats/packetbeat/protos"
 	"github.com/elastic/beats/packetbeat/protos/tcp"
-	"github.com/elastic/beats/packetbeat/publish"
 )
 
 var debugf = logp.MakeDebug("mongodb")
@@ -28,7 +45,7 @@ type mongodbPlugin struct {
 	responses          *common.Cache
 	transactionTimeout time.Duration
 
-	results publish.Transactions
+	results protos.Reporter
 }
 
 type transactionKey struct {
@@ -37,7 +54,7 @@ type transactionKey struct {
 }
 
 var (
-	unmatchedRequests = expvar.NewInt("mongodb.unmatched_requests")
+	unmatchedRequests = monitoring.NewInt(nil, "mongodb.unmatched_requests")
 )
 
 func init() {
@@ -46,7 +63,7 @@ func init() {
 
 func New(
 	testMode bool,
-	results publish.Transactions,
+	results protos.Reporter,
 	cfg *common.Config,
 ) (protos.Plugin, error) {
 	p := &mongodbPlugin{}
@@ -63,7 +80,7 @@ func New(
 	return p, nil
 }
 
-func (mongodb *mongodbPlugin) init(results publish.Transactions, config *mongodbConfig) error {
+func (mongodb *mongodbPlugin) init(results protos.Reporter, config *mongodbConfig) error {
 	debugf("Init a MongoDB protocol parser")
 	mongodb.setFromConfig(config)
 
@@ -200,7 +217,7 @@ func (mongodb *mongodbPlugin) handleMongodb(
 
 	m.tcpTuple = *tcptuple
 	m.direction = dir
-	m.cmdlineTuple = procs.ProcWatcher.FindProcessesTuple(tcptuple.IPPort())
+	m.cmdlineTuple = procs.ProcWatcher.FindProcessesTupleTCP(tcptuple.IPPort())
 
 	if m.isResponse {
 		debugf("MongoDB response message")
@@ -269,16 +286,7 @@ func newTransaction(requ, resp *mongodbMessage) *transaction {
 
 		trans.cmdline = requ.cmdlineTuple
 		trans.ts = requ.ts
-		trans.src = common.Endpoint{
-			IP:   requ.tcpTuple.SrcIP.String(),
-			Port: requ.tcpTuple.SrcPort,
-			Proc: string(requ.cmdlineTuple.Src),
-		}
-		trans.dst = common.Endpoint{
-			IP:   requ.tcpTuple.DstIP.String(),
-			Port: requ.tcpTuple.DstPort,
-			Proc: string(requ.cmdlineTuple.Dst),
-		}
+		trans.src, trans.dst = common.MakeEndpointPair(requ.tcpTuple.BaseTuple, requ.cmdlineTuple)
 		if requ.direction == tcp.TCPDirectionReverse {
 			trans.src, trans.dst = trans.dst, trans.src
 		}
@@ -362,33 +370,32 @@ func reconstructQuery(t *transaction, full bool) (query string) {
 }
 
 func (mongodb *mongodbPlugin) publishTransaction(t *transaction) {
-
 	if mongodb.results == nil {
 		debugf("Try to publish transaction with null results")
 		return
 	}
 
-	event := common.MapStr{}
-	event["type"] = "mongodb"
+	timestamp := t.ts
+	fields := common.MapStr{}
+	fields["type"] = "mongodb"
 	if t.error == "" {
-		event["status"] = common.OK_STATUS
+		fields["status"] = common.OK_STATUS
 	} else {
 		t.event["error"] = t.error
-		event["status"] = common.ERROR_STATUS
+		fields["status"] = common.ERROR_STATUS
 	}
-	event["mongodb"] = t.event
-	event["method"] = t.method
-	event["resource"] = t.resource
-	event["query"] = reconstructQuery(t, false)
-	event["responsetime"] = t.responseTime
-	event["bytes_in"] = uint64(t.bytesIn)
-	event["bytes_out"] = uint64(t.bytesOut)
-	event["@timestamp"] = common.Time(t.ts)
-	event["src"] = &t.src
-	event["dst"] = &t.dst
+	fields["mongodb"] = t.event
+	fields["method"] = t.method
+	fields["resource"] = t.resource
+	fields["query"] = reconstructQuery(t, false)
+	fields["responsetime"] = t.responseTime
+	fields["bytes_in"] = uint64(t.bytesIn)
+	fields["bytes_out"] = uint64(t.bytesOut)
+	fields["src"] = &t.src
+	fields["dst"] = &t.dst
 
 	if mongodb.sendRequest {
-		event["request"] = reconstructQuery(t, true)
+		fields["request"] = reconstructQuery(t, true)
 	}
 	if mongodb.sendResponse {
 		if len(t.documents) > 0 {
@@ -409,9 +416,12 @@ func (mongodb *mongodbPlugin) publishTransaction(t *transaction) {
 					docs = append(docs, str)
 				}
 			}
-			event["response"] = strings.Join(docs, "\n")
+			fields["response"] = strings.Join(docs, "\n")
 		}
 	}
 
-	mongodb.results.PublishTransaction(event)
+	mongodb.results(beat.Event{
+		Timestamp: timestamp,
+		Fields:    fields,
+	})
 }

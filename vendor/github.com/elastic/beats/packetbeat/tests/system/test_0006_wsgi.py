@@ -1,5 +1,7 @@
 from packetbeat import BaseTest
 
+import six
+
 """
 Tests for parsing WSGI traffic.
 """
@@ -28,7 +30,7 @@ class Test(BaseTest):
         assert "request" not in objs[0]
         assert "response" not in objs[0]
 
-    def test_drum_interraction(self):
+    def test_drum_interaction(self):
         self.render_config_template(
             http_ports=[8888]
         )
@@ -108,7 +110,7 @@ class Test(BaseTest):
         assert len(o["http.request.headers"]) > 0
         assert len(o["http.response.headers"]) > 0
         assert isinstance(o["http.response.headers"]["set-cookie"],
-                          basestring)
+                          six.string_types)
 
         self.render_config_template(
             http_ports=[8888],

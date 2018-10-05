@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package cassandra
 
 import (
@@ -8,7 +25,6 @@ import (
 
 	"github.com/elastic/beats/packetbeat/protos"
 	"github.com/elastic/beats/packetbeat/protos/tcp"
-	"github.com/elastic/beats/packetbeat/publish"
 
 	gocql "github.com/elastic/beats/packetbeat/protos/cassandra/internal/gocql"
 )
@@ -27,7 +43,7 @@ type connection struct {
 	trans   transactions
 }
 
-// Uni-directioal tcp stream state for parsing messages.
+// Uni-directional tcp stream state for parsing messages.
 type stream struct {
 	parser parser
 }
@@ -43,7 +59,7 @@ func init() {
 // New create and initializes a new cassandra protocol analyzer instance.
 func New(
 	testMode bool,
-	results publish.Transactions,
+	results protos.Reporter,
 	cfg *common.Config,
 ) (protos.Plugin, error) {
 	p := &cassandra{}
@@ -60,7 +76,7 @@ func New(
 	return p, nil
 }
 
-func (cassandra *cassandra) init(results publish.Transactions, config *cassandraConfig) error {
+func (cassandra *cassandra) init(results protos.Reporter, config *cassandraConfig) error {
 	if err := cassandra.setFromConfig(config); err != nil {
 		return err
 	}
@@ -69,7 +85,6 @@ func (cassandra *cassandra) init(results publish.Transactions, config *cassandra
 }
 
 func (cassandra *cassandra) setFromConfig(config *cassandraConfig) error {
-
 	// set module configuration
 	if err := cassandra.ports.Set(config.Ports); err != nil {
 		return err

@@ -1,9 +1,27 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package ucfg
 
 import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"time"
 )
 
@@ -63,6 +81,18 @@ func New() *Config {
 	return &Config{
 		fields: &fields{nil, nil},
 	}
+}
+
+// NustNewFrom creates a new config object normalizing and copying from into the new
+// Config object. MustNewFrom uses Merge to copy from.
+//
+// MustNewFrom supports the options: PathSep, MetaData, StructTag, VarExp
+func MustNewFrom(from interface{}, opts ...Option) *Config {
+	c := New()
+	if err := c.Merge(from, opts...); err != nil {
+		panic(err)
+	}
+	return c
 }
 
 // NewFrom creates a new config object normalizing and copying from into the new
@@ -132,6 +162,47 @@ func (c *Config) Parent() *Config {
 	}
 }
 
+// FlattenedKeys return a sorted flattened views of the set keys in the configuration
+func (c *Config) FlattenedKeys(opts ...Option) []string {
+	var keys []string
+	normalizedOptions := makeOptions(opts)
+
+	if normalizedOptions.pathSep == "" {
+		normalizedOptions.pathSep = "."
+	}
+
+	if c.IsDict() {
+		for _, v := range c.fields.dict() {
+
+			subcfg, err := v.toConfig(normalizedOptions)
+			if err != nil {
+				ctx := v.Context()
+				p := ctx.path(normalizedOptions.pathSep)
+				keys = append(keys, p)
+			} else {
+				newKeys := subcfg.FlattenedKeys(opts...)
+				keys = append(keys, newKeys...)
+			}
+		}
+	} else if c.IsArray() {
+		for _, a := range c.fields.array() {
+			scfg, err := a.toConfig(normalizedOptions)
+
+			if err != nil {
+				ctx := a.Context()
+				p := ctx.path(normalizedOptions.pathSep)
+				keys = append(keys, p)
+			} else {
+				newKeys := scfg.FlattenedKeys(opts...)
+				keys = append(keys, newKeys...)
+			}
+		}
+	}
+
+	sort.Strings(keys)
+	return keys
+}
+
 func (f *fields) get(name string) (value, bool) {
 	if f.d == nil {
 		return nil, false
@@ -174,4 +245,28 @@ func (f *fields) setAt(idx int, parent, v value) {
 	}
 
 	f.a[idx] = v
+}
+
+func (f *fields) append(parent value, a []value) {
+	l := len(f.a)
+	count := len(a)
+	if count == 0 {
+		return
+	}
+
+	for i := 0; i < count; i, l = i+1, l+1 {
+		ctx := context{
+			parent: parent,
+			field:  fmt.Sprintf("%v", l),
+		}
+		f.setAt(l, parent, a[i].cpy(ctx))
+	}
+}
+
+func (o *fieldOptions) configHandling() configHandling {
+	h := o.tag.cfgHandling
+	if h == cfgDefaultHandling {
+		h = o.opts.configValueHandling
+	}
+	return h
 }

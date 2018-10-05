@@ -1,13 +1,31 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package nfs
 
 // This file contains methods process RPC calls
 
 import (
-	"expvar"
 	"fmt"
 	"time"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/monitoring"
 	"github.com/elastic/beats/packetbeat/protos/tcp"
 )
 
@@ -23,19 +41,18 @@ var acceptStatus = [...]string{
 }
 
 var (
-	unmatchedRequests = expvar.NewInt("nfs.unmatched_requests")
+	unmatchedRequests = monitoring.NewInt(nil, "nfs.unmatched_requests")
 )
 
 // called by Cache, when re reply seen within expected time window
 func (r *rpc) handleExpiredPacket(nfs *nfs) {
-	nfs.event["status"] = "NO_REPLY"
-	r.results.PublishTransaction(nfs.event)
+	nfs.event.Fields["status"] = "NO_REPLY"
+	r.results(nfs.event)
 	unmatchedRequests.Add(1)
 }
 
 // called when we process a RPC call
 func (r *rpc) handleCall(xid string, xdr *xdr, ts time.Time, tcptuple *common.TCPTuple, dir uint8) {
-
 	// eat rpc version number
 	xdr.getUInt()
 	rpcProg := xdr.getUInt()
@@ -59,11 +76,10 @@ func (r *rpc) handleCall(xid string, xdr *xdr, ts time.Time, tcptuple *common.TC
 		src, dst = dst, src
 	}
 
-	event := common.MapStr{}
-	event["@timestamp"] = common.Time(ts)
-	event["status"] = common.OK_STATUS // all packages are OK for now
-	event["src"] = &src
-	event["dst"] = &dst
+	fields := common.MapStr{}
+	fields["status"] = common.OK_STATUS // all packages are OK for now
+	fields["src"] = &src
+	fields["dst"] = &dst
 
 	nfsVers := xdr.getUInt()
 	nfsProc := xdr.getUInt()
@@ -102,10 +118,17 @@ func (r *rpc) handleCall(xid string, xdr *xdr, ts time.Time, tcptuple *common.TC
 	xdr.getUInt()
 	xdr.getDynamicOpaque()
 
-	event["type"] = "nfs"
-	event["rpc"] = rpcInfo
-	nfs := nfs{vers: nfsVers, proc: nfsProc, event: event}
-	event["nfs"] = nfs.getRequestInfo(xdr)
+	fields["type"] = "nfs"
+	fields["rpc"] = rpcInfo
+	nfs := nfs{
+		vers: nfsVers,
+		proc: nfsProc,
+		event: beat.Event{
+			Timestamp: ts,
+			Fields:    fields,
+		},
+	}
+	fields["nfs"] = nfs.getRequestInfo(xdr)
 
 	// use xid+src ip to uniquely identify request
 	reqID := xid + tcptuple.SrcIP.String()
@@ -141,9 +164,10 @@ func (r *rpc) handleReply(xid string, xdr *xdr, ts time.Time, tcptuple *common.T
 	if v != nil {
 		nfs := v.(*nfs)
 		event := nfs.event
-		rpcInfo := event["rpc"].(common.MapStr)
+		fields := event.Fields
+		rpcInfo := fields["rpc"].(common.MapStr)
 		rpcInfo["reply_size"] = xdr.size()
-		rpcTime := ts.Sub(time.Time(event["@timestamp"].(common.Time)))
+		rpcTime := ts.Sub(event.Timestamp)
 		rpcInfo["time"] = rpcTime
 		// the same in human readable form
 		rpcInfo["time_str"] = fmt.Sprintf("%v", rpcTime)
@@ -152,9 +176,9 @@ func (r *rpc) handleReply(xid string, xdr *xdr, ts time.Time, tcptuple *common.T
 
 		// populate nfs info for successfully executed requests
 		if status == 0 {
-			nfsInfo := event["nfs"].(common.MapStr)
+			nfsInfo := fields["nfs"].(common.MapStr)
 			nfsInfo["status"] = nfs.getNFSReplyStatus(xdr)
 		}
-		r.results.PublishTransaction(event)
+		r.results(event)
 	}
 }

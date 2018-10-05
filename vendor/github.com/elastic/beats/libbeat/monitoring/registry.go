@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package monitoring
 
 import (
@@ -41,7 +58,7 @@ func (r *Registry) Do(mode Mode, f func(string, interface{})) {
 	r.doVisit(mode, NewKeyValueVisitor(f))
 }
 
-// Visit uses the Visitor interface to iterate the complete metrics hieararchie.
+// Visit uses the Visitor interface to iterate the complete metrics hierarchies.
 // In case of the visitor reporting an error, Visit will return immediately,
 // reporting the very same error.
 func (r *Registry) Visit(mode Mode, vs Visitor) {
@@ -56,8 +73,10 @@ func (r *Registry) doVisit(mode Mode, vs Visitor) {
 	defer r.mu.RUnlock()
 
 	for key, v := range r.entries {
-		if v.Mode > mode {
-			continue
+		if _, isReg := v.Var.(*Registry); !isReg {
+			if v.Mode > mode {
+				continue
+			}
 		}
 
 		vs.OnKey(key)
@@ -126,10 +145,21 @@ func (r *Registry) Clear() error {
 // Add adds a new variable to the registry. The method panics if the variables
 // name is already in use.
 func (r *Registry) Add(name string, v Var, m Mode) {
-	panicErr(r.addNames(strings.Split(name, "."), v, m))
+	opts := r.opts
+	if m != opts.mode {
+		tmp := *r.opts
+		tmp.mode = m
+		opts = &tmp
+	}
+
+	panicErr(r.addNames(strings.Split(name, "."), v, opts))
 }
 
-func (r *Registry) addNames(names []string, v Var, m Mode) error {
+func (r *Registry) doAdd(name string, v Var, opts *options) {
+	panicErr(r.addNames(strings.Split(name, "."), v, opts))
+}
+
+func (r *Registry) addNames(names []string, v Var, opts *options) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -139,7 +169,7 @@ func (r *Registry) addNames(names []string, v Var, m Mode) error {
 			return fmt.Errorf("name %v already used", name)
 		}
 
-		r.entries[name] = entry{v, m}
+		r.entries[name] = entry{v, opts.mode}
 		return nil
 	}
 
@@ -149,12 +179,12 @@ func (r *Registry) addNames(names []string, v Var, m Mode) error {
 			return fmt.Errorf("name %v already used", name)
 		}
 
-		return reg.addNames(names[1:], v, m)
+		return reg.addNames(names[1:], v, opts)
 	}
 
 	sub := NewRegistry()
-	sub.opts = r.opts
-	if err := sub.addNames(names[1:], v, m); err != nil {
+	sub.opts = opts
+	if err := sub.addNames(names[1:], v, opts); err != nil {
 		return err
 	}
 

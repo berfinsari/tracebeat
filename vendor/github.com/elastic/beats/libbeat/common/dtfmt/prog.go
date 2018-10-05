@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package dtfmt
 
 import (
@@ -10,24 +27,27 @@ type prog struct {
 }
 
 const (
-	opNone      byte = iota
-	opCopy1          // copy next byte
-	opCopy2          // copy next 2 bytes
-	opCopy3          // copy next 3 bytes
-	opCopy4          // copy next 4 bytes
-	opCopyShort      // [op, len, content[len]]
-	opCopyLong       // [op, len1, len, content[len1<<8 + len]]
-	opNum            // [op, ft]
-	opNumPadded      // [op, ft, digits]
-	opTwoDigit       // [op, ft]
-	opTextShort      // [op, ft]
-	opTextLong       // [op, ft]
+	opNone         byte = iota
+	opCopy1             // copy next byte
+	opCopy2             // copy next 2 bytes
+	opCopy3             // copy next 3 bytes
+	opCopy4             // copy next 4 bytes
+	opCopyShort         // [op, len, content[len]]
+	opCopyLong          // [op, len1, len, content[len1<<8 + len]]
+	opNum               // [op, ft]
+	opNumPadded         // [op, ft, digits]
+	opExtNumPadded      // [op, ft, div, digits]
+	opZeros             // [op, count]
+	opTwoDigit          // [op, ft]
+	opTextShort         // [op, ft]
+	opTextLong          // [op, ft]
 )
 
 func (p prog) eval(bytes []byte, ctx *ctx, t time.Time) ([]byte, error) {
 	for i := 0; i < len(p.p); {
 		op := p.p[i]
 		i++
+
 		switch op {
 		case opNone:
 
@@ -69,6 +89,20 @@ func (p prog) eval(bytes []byte, ctx *ctx, t time.Time) ([]byte, error) {
 				return bytes, err
 			}
 			bytes = appendPadded(bytes, v, digits)
+		case opExtNumPadded:
+			ft, div, digits := fieldType(p.p[i]), int(p.p[i+1]), int(p.p[i+2])
+			i += 3
+			v, err := getIntField(ft, ctx, t)
+			if err != nil {
+				return bytes, err
+			}
+			bytes = appendPadded(bytes, v/div, digits)
+		case opZeros:
+			digits := int(p.p[i])
+			i++
+			for x := 0; x < digits; x++ {
+				bytes = append(bytes, '0')
+			}
 		case opTwoDigit:
 			ft := fieldType(p.p[i])
 			i++

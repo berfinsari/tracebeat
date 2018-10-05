@@ -32,5 +32,4 @@
       required: true
       example: metricsets
       description: >
-        The document type. Always set to "metricsets".
-
+        The document type. Always set to "doc".

@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package outputs
 
 import (
@@ -9,13 +26,13 @@ import (
 
 type outputPlugin struct {
 	name    string
-	builder OutputBuilder
+	factory Factory
 }
 
-var pluginKey = "libbeat.output"
+var pluginKey = "libbeat.out"
 
-func Plugin(name string, l OutputBuilder) map[string][]interface{} {
-	return p.MakePlugin(pluginKey, outputPlugin{name, l})
+func Plugin(name string, f Factory) map[string][]interface{} {
+	return p.MakePlugin(pluginKey, outputPlugin{name, f})
 }
 
 func init() {
@@ -26,11 +43,11 @@ func init() {
 		}
 
 		name := b.name
-		if outputsPlugins[name] != nil {
+		if outputReg[name] != nil {
 			return fmt.Errorf("output type %v already registered", name)
 		}
 
-		RegisterOutputPlugin(name, b.builder)
+		RegisterType(name, b.factory)
 		return nil
 	})
 }

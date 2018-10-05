@@ -1,18 +1,35 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package redis
 
 import (
 	"bytes"
-	"expvar"
 	"time"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/libbeat/monitoring"
 
 	"github.com/elastic/beats/packetbeat/procs"
 	"github.com/elastic/beats/packetbeat/protos"
 	"github.com/elastic/beats/packetbeat/protos/applayer"
 	"github.com/elastic/beats/packetbeat/protos/tcp"
-	"github.com/elastic/beats/packetbeat/publish"
 )
 
 type stream struct {
@@ -40,7 +57,7 @@ type redisPlugin struct {
 
 	transactionTimeout time.Duration
 
-	results publish.Transactions
+	results protos.Reporter
 }
 
 var (
@@ -49,7 +66,7 @@ var (
 )
 
 var (
-	unmatchedResponses = expvar.NewInt("redis.unmatched_responses")
+	unmatchedResponses = monitoring.NewInt(nil, "redis.unmatched_responses")
 )
 
 func init() {
@@ -58,7 +75,7 @@ func init() {
 
 func New(
 	testMode bool,
-	results publish.Transactions,
+	results protos.Reporter,
 	cfg *common.Config,
 ) (protos.Plugin, error) {
 	p := &redisPlugin{}
@@ -75,7 +92,7 @@ func New(
 	return p, nil
 }
 
-func (redis *redisPlugin) init(results publish.Transactions, config *redisConfig) error {
+func (redis *redisPlugin) init(results protos.Reporter, config *redisConfig) error {
 	redis.setFromConfig(config)
 
 	redis.results = results
@@ -224,7 +241,7 @@ func (redis *redisPlugin) handleRedis(
 ) {
 	m.tcpTuple = *tcptuple
 	m.direction = dir
-	m.cmdlineTuple = procs.ProcWatcher.FindProcessesTuple(tcptuple.IPPort())
+	m.cmdlineTuple = procs.ProcWatcher.FindProcessesTupleTCP(tcptuple.IPPort())
 
 	if m.isRequest {
 		conn.requests.append(m) // wait for response
@@ -252,12 +269,12 @@ func (redis *redisPlugin) correlate(conn *redisConnectionData) {
 
 		if redis.results != nil {
 			event := redis.newTransaction(requ, resp)
-			redis.results.PublishTransaction(event)
+			redis.results(event)
 		}
 	}
 }
 
-func (redis *redisPlugin) newTransaction(requ, resp *redisMessage) common.MapStr {
+func (redis *redisPlugin) newTransaction(requ, resp *redisMessage) beat.Event {
 	error := common.OK_STATUS
 	if resp.isError {
 		error = common.ERROR_STATUS
@@ -274,16 +291,8 @@ func (redis *redisPlugin) newTransaction(requ, resp *redisMessage) common.MapStr
 		}
 	}
 
-	src := &common.Endpoint{
-		IP:   requ.tcpTuple.SrcIP.String(),
-		Port: requ.tcpTuple.SrcPort,
-		Proc: string(requ.cmdlineTuple.Src),
-	}
-	dst := &common.Endpoint{
-		IP:   requ.tcpTuple.DstIP.String(),
-		Port: requ.tcpTuple.DstPort,
-		Proc: string(requ.cmdlineTuple.Dst),
-	}
+	source, destination := common.MakeEndpointPair(requ.tcpTuple.BaseTuple, requ.cmdlineTuple)
+	src, dst := &source, &destination
 	if requ.direction == tcp.TCPDirectionReverse {
 		src, dst = dst, src
 	}
@@ -291,8 +300,7 @@ func (redis *redisPlugin) newTransaction(requ, resp *redisMessage) common.MapStr
 	// resp_time in milliseconds
 	responseTime := int32(resp.ts.Sub(requ.ts).Nanoseconds() / 1e6)
 
-	event := common.MapStr{
-		"@timestamp":   common.Time(requ.ts),
+	fields := common.MapStr{
 		"type":         "redis",
 		"status":       error,
 		"responsetime": responseTime,
@@ -306,13 +314,16 @@ func (redis *redisPlugin) newTransaction(requ, resp *redisMessage) common.MapStr
 		"dst":          dst,
 	}
 	if redis.sendRequest {
-		event["request"] = requ.message
+		fields["request"] = requ.message
 	}
 	if redis.sendResponse {
-		event["response"] = resp.message
+		fields["response"] = resp.message
 	}
 
-	return event
+	return beat.Event{
+		Timestamp: requ.ts,
+		Fields:    fields,
+	}
 }
 
 func (redis *redisPlugin) GapInStream(tcptuple *common.TCPTuple, dir uint8,

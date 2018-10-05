@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package common
 
 import (
@@ -5,12 +22,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elastic/beats/libbeat/logp"
+	uuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/elastic/beats/libbeat/logp"
 )
 
 func TestConvertNestedMapStr(t *testing.T) {
-	logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"*"})
+	logp.TestingSetup()
 
 	type io struct {
 		Input  MapStr
@@ -117,11 +136,10 @@ func TestConvertNestedMapStr(t *testing.T) {
 	for i, test := range tests {
 		assert.Equal(t, test.Output, ConvertToGenericEvent(test.Input), "Test case %d", i)
 	}
-
 }
 
 func TestConvertNestedStruct(t *testing.T) {
-	logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"*"})
+	logp.TestingSetup()
 
 	type io struct {
 		Input  MapStr
@@ -178,10 +196,12 @@ func TestConvertNestedStruct(t *testing.T) {
 }
 
 func TestNormalizeValue(t *testing.T) {
-	logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"*"})
+	logp.TestingSetup()
 
 	var nilStringPtr *string
+	var nilTimePtr *time.Time
 	someString := "foo"
+	uuidValue := uuid.NewV1()
 
 	type mybool bool
 	type myint int32
@@ -192,9 +212,11 @@ func TestNormalizeValue(t *testing.T) {
 		out interface{}
 	}{
 		{nil, nil},
-		{&someString, someString},   // Pointers are dereferenced.
-		{nilStringPtr, nil},         // Nil pointers are dropped.
-		{NetString("test"), "test"}, // It honors the TextMarshaler contract.
+		{&someString, someString},       // Pointers are dereferenced.
+		{nilStringPtr, nil},             // Nil pointers are dropped.
+		{nilTimePtr, nil},               // Nil pointers are dropped.
+		{uuidValue, uuidValue.String()}, // Struct that honors the TextMarshaler contract.
+		{NetString("test"), "test"},     // It honors the TextMarshaler contract.
 		{true, true},
 		{int8(8), int8(8)},
 		{uint8(8), uint8(8)},
@@ -233,6 +255,23 @@ func TestNormalizeValue(t *testing.T) {
 		}
 
 		assert.Equal(t, test.out, out, "Test case %v", i)
+	}
+
+	var floatTests = []struct {
+		in  interface{}
+		out interface{}
+	}{
+		{float32(1), float64(1)},
+		{float64(1), float64(1)},
+	}
+
+	for i, test := range floatTests {
+		out, err := normalizeValue(test.in)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		assert.InDelta(t, test.out, float64(out.(Float)), 0.000001, "(approximate) Test case %v", i)
 	}
 }
 
@@ -300,7 +339,6 @@ func TestMarshalUnmarshalArray(t *testing.T) {
 }
 
 func TestMarshalFloatValues(t *testing.T) {
-
 	assert := assert.New(t)
 
 	var f float64
@@ -378,5 +416,62 @@ func BenchmarkConvertToGenericEventStringPointer(b *testing.B) {
 	val := "foo"
 	for i := 0; i < b.N; i++ {
 		ConvertToGenericEvent(MapStr{"key": &val})
+	}
+}
+func TestDeDotJSON(t *testing.T) {
+	var tests = []struct {
+		input  []byte
+		output []byte
+		valuer func() interface{}
+	}{
+		{
+			input: []byte(`[
+				{"key_with_dot.1":"value1_1"},
+				{"key_without_dot_2":"value1_2"},
+				{"key_with_multiple.dots.3": {"key_with_dot.2":"value2_1"}}
+			]
+			`),
+			output: []byte(`[
+				{"key_with_dot_1":"value1_1"},
+				{"key_without_dot_2":"value1_2"},
+				{"key_with_multiple_dots_3": {"key_with_dot_2":"value2_1"}}
+			]
+			`),
+			valuer: func() interface{} { return []interface{}{} },
+		},
+		{
+			input: []byte(`{
+				"key_without_dot_l1": {
+					"key_with_dot.l2": 1,
+					"key.with.multiple.dots_l2": 2,
+					"key_without_dot_l2": {
+						"key_with_dot.l3": 3,
+						"key.with.multiple.dots_l3": 4
+					}
+				}
+			}
+			`),
+			output: []byte(`{
+				"key_without_dot_l1": {
+					"key_with_dot_l2": 1,
+					"key_with_multiple_dots_l2": 2,
+					"key_without_dot_l2": {
+						"key_with_dot_l3": 3,
+						"key_with_multiple_dots_l3": 4
+					}
+				}
+			}
+			`),
+			valuer: func() interface{} { return map[string]interface{}{} },
+		},
+	}
+	for _, test := range tests {
+		input, output := test.valuer(), test.valuer()
+		assert.Nil(t, json.Unmarshal(test.input, &input))
+		assert.Nil(t, json.Unmarshal(test.output, &output))
+		assert.Equal(t, output, DeDotJSON(input))
+		if _, ok := test.valuer().(map[string]interface{}); ok {
+			assert.Equal(t, MapStr(output.(map[string]interface{})), DeDotJSON(MapStr(input.(map[string]interface{}))))
+		}
 	}
 }

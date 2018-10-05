@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build !integration
 
 package tcp
@@ -10,7 +27,6 @@ import (
 
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/packetbeat/protos"
-	"github.com/elastic/beats/packetbeat/publish"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tsg/gopacket/layers"
@@ -28,7 +44,7 @@ var (
 )
 
 func init() {
-	new := func(_ bool, _ publish.Transactions, _ *common.Config) (protos.Plugin, error) {
+	new := func(_ bool, _ protos.Reporter, _ *common.Config) (protos.Plugin, error) {
 		return &TestProtocol{}, nil
 	}
 
@@ -44,14 +60,14 @@ func init() {
 type TestProtocol struct {
 	Ports []int
 
-	init  func(testMode bool, results publish.Transactions) error
+	init  func(testMode bool, results protos.Reporter) error
 	parse func(*protos.Packet, *common.TCPTuple, uint8, protos.ProtocolData) protos.ProtocolData
 	onFin func(*common.TCPTuple, uint8, protos.ProtocolData) protos.ProtocolData
 	gap   func(*common.TCPTuple, uint8, int, protos.ProtocolData) (protos.ProtocolData, bool)
 }
 
 var _ protos.Plugin = &TestProtocol{
-	init: func(m bool, r publish.Transactions) error { return nil },
+	init: func(m bool, r protos.Reporter) error { return nil },
 	parse: func(p *protos.Packet, t *common.TCPTuple, d uint8, priv protos.ProtocolData) protos.ProtocolData {
 		return priv
 	},
@@ -63,7 +79,7 @@ var _ protos.Plugin = &TestProtocol{
 	},
 }
 
-func (proto *TestProtocol) Init(testMode bool, results publish.Transactions) error {
+func (proto *TestProtocol) Init(testMode bool, results protos.Reporter) error {
 	return proto.init(testMode, results)
 }
 
@@ -91,7 +107,6 @@ func (proto TestProtocol) ConnectionTimeout() time.Duration {
 }
 
 func Test_configToPortsMap(t *testing.T) {
-
 	type configTest struct {
 		Input  map[protos.Protocol]protos.TCPPlugin
 		Output map[uint16]protos.Protocol
@@ -144,7 +159,6 @@ func Test_configToPortsMap(t *testing.T) {
 }
 
 func Test_configToPortsMap_negative(t *testing.T) {
-
 	type errTest struct {
 		Input map[protos.Protocol]protos.TCPPlugin
 		Err   string

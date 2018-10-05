@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build windows
 
 package eventlog
@@ -33,20 +50,8 @@ func TestWinEventLogBatchReadSize(t *testing.T) {
 	}
 
 	batchReadSize := 2
-	eventlog, err := newWinEventLog(map[string]interface{}{"name": providerName, "batch_read_size": batchReadSize})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = eventlog.Open(0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err := eventlog.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-	}()
+	eventlog, teardown := setupWinEventLog(t, 0, map[string]interface{}{"name": providerName, "batch_read_size": batchReadSize})
+	defer teardown()
 
 	records, err := eventlog.Read()
 	if err != nil {
@@ -77,26 +82,14 @@ func TestReadLargeBatchSize(t *testing.T) {
 	// Publish large test messages.
 	totalEvents := 1000
 	for i := 0; i < totalEvents; i++ {
-		err = log.Report(elog.Info, uint32(i%1000), []string{strconv.Itoa(i) + " " + randString(31800)})
+		err = log.Report(elog.Info, uint32(i%1000), []string{strconv.Itoa(i) + " " + randomSentence(31800)})
 		if err != nil {
 			t.Fatal("ReportEvent error", err)
 		}
 	}
 
-	eventlog, err := newWinEventLog(map[string]interface{}{"name": providerName, "batch_read_size": 1024})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = eventlog.Open(0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err := eventlog.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-	}()
+	eventlog, teardown := setupWinEventLog(t, 0, map[string]interface{}{"name": providerName, "batch_read_size": 1024})
+	defer teardown()
 
 	var eventCount int
 	for eventCount < totalEvents {
@@ -120,4 +113,8 @@ func TestReadLargeBatchSize(t *testing.T) {
 			t.Log(kv)
 		}
 	})
+}
+
+func setupWinEventLog(t *testing.T, recordID uint64, options map[string]interface{}) (EventLog, func()) {
+	return setupEventLog(t, newWinEventLog, recordID, options)
 }

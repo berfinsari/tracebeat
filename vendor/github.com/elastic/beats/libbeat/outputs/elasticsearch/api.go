@@ -1,11 +1,29 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package elasticsearch
 
 import (
 	"encoding/json"
 
-	"github.com/elastic/beats/libbeat/logp"
+	"github.com/pkg/errors"
 )
 
+// QueryResult contains the result of a query.
 type QueryResult struct {
 	Ok           bool            `json:"ok"`
 	Index        string          `json:"_index"`
@@ -13,13 +31,15 @@ type QueryResult struct {
 	ID           string          `json:"_id"`
 	Source       json.RawMessage `json:"_source"`
 	Version      int             `json:"_version"`
-	Found        bool            `json:"found"`
 	Exists       bool            `json:"exists"`
-	Created      bool            `json:"created"`
+	Found        bool            `json:"found"`   // Only used prior to ES 6. You must also check for Result == "found".
+	Created      bool            `json:"created"` // Only used prior to ES 6. You must also check for Result == "created".
+	Result       string          `json:"result"`  // Only used in ES 6+.
 	Acknowledged bool            `json:"acknowledged"`
 	Matches      []string        `json:"matches"`
 }
 
+// SearchResults contains the results of a search.
 type SearchResults struct {
 	Took   int                        `json:"took"`
 	Shards json.RawMessage            `json:"_shards"`
@@ -27,28 +47,21 @@ type SearchResults struct {
 	Aggs   map[string]json.RawMessage `json:"aggregations"`
 }
 
+// Hits contains the hits.
 type Hits struct {
 	Total int
 	Hits  []json.RawMessage `json:"hits"`
 }
 
+// CountResults contains the count of results.
 type CountResults struct {
 	Count  int             `json:"count"`
 	Shards json.RawMessage `json:"_shards"`
 }
 
-func (r QueryResult) String() string {
-	out, err := json.Marshal(r)
-	if err != nil {
-		logp.Warn("failed to marshal QueryResult (%v): %#v", err, r)
-		return "ERROR"
-	}
-	return string(out)
-}
-
 func withQueryResult(status int, resp []byte, err error) (int, *QueryResult, error) {
 	if err != nil {
-		return status, nil, err
+		return status, nil, errors.Wrapf(err, "Elasticsearch response: %s", resp)
 	}
 	result, err := readQueryResult(resp)
 	return status, result, err
@@ -109,6 +122,7 @@ func (es *Connection) Index(
 	return withQueryResult(es.apiCall(method, index, docType, id, "", params, body))
 }
 
+// Ingest pushes a pipeline of updates.
 func (es *Connection) Ingest(
 	index, docType, pipeline, id string,
 	params map[string]string,
@@ -135,10 +149,28 @@ func (es *Connection) CreateIndex(index string, body interface{}) (int, *QueryRe
 	return withQueryResult(es.apiCall("PUT", index, "", "", "", nil, body))
 }
 
+// IndexExists checks if an index exists.
+// Implements: https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-exists.html
+//
+func (es *Connection) IndexExists(index string) (int, error) {
+	status, _, err := es.apiCall("HEAD", index, "", "", "", nil, nil)
+	return status, err
+}
+
 // Delete deletes a typed JSON document from a specific index based on its id.
 // Implements: http://www.elastic.co/guide/en/elasticsearch/reference/current/docs-delete.html
 func (es *Connection) Delete(index string, docType string, id string, params map[string]string) (int, *QueryResult, error) {
 	return withQueryResult(es.apiCall("DELETE", index, docType, id, "", params, nil))
+}
+
+// PipelineExists checks if a pipeline with name id already exists.
+// Using: https://www.elastic.co/guide/en/elasticsearch/reference/current/get-pipeline-api.html
+func (es *Connection) PipelineExists(id string) (bool, error) {
+	status, _, err := es.apiCall("GET", "_ingest", "pipeline", id, "", nil, nil)
+	if status == 404 {
+		return false, nil
+	}
+	return status == 200, err
 }
 
 // CreatePipeline create a new ingest pipeline with name id.
@@ -160,10 +192,21 @@ func (es *Connection) DeletePipeline(
 	return withQueryResult(es.apiCall("DELETE", "_ingest", "pipeline", id, "", params, nil))
 }
 
-// A search request can be executed purely using a URI by providing request parameters.
+// SearchURI executes a search request using a URI by providing request parameters.
 // Implements: http://www.elastic.co/guide/en/elasticsearch/reference/current/search-uri-request.html
 func (es *Connection) SearchURI(index string, docType string, params map[string]string) (int, *SearchResults, error) {
-	status, resp, err := es.apiCall("GET", index, docType, "_search", "", params, nil)
+	return es.SearchURIWithBody(index, docType, params, nil)
+}
+
+// SearchURIWithBody executes a search request using a URI by providing request
+// parameters and a request body.
+func (es *Connection) SearchURIWithBody(
+	index string,
+	docType string,
+	params map[string]string,
+	body interface{},
+) (int, *SearchResults, error) {
+	status, resp, err := es.apiCall("GET", index, docType, "_search", "", params, body)
 	if err != nil {
 		return status, nil, err
 	}
@@ -171,6 +214,7 @@ func (es *Connection) SearchURI(index string, docType string, params map[string]
 	return status, result, err
 }
 
+// CountSearchURI counts the results for a search request.
 func (es *Connection) CountSearchURI(
 	index string, docType string,
 	params map[string]string,

@@ -1,11 +1,30 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package actions
 
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
-	"github.com/stretchr/testify/assert"
 )
 
 var fields = [1]string{"msg"}
@@ -42,7 +61,6 @@ func TestFieldNotString(t *testing.T) {
 	}
 
 	assert.Equal(t, expected.String(), actual.String())
-
 }
 
 func TestInvalidJSON(t *testing.T) {
@@ -58,7 +76,6 @@ func TestInvalidJSON(t *testing.T) {
 		"pipeline": "us1",
 	}
 	assert.Equal(t, expected.String(), actual.String())
-
 }
 
 func TestInvalidJSONMultiple(t *testing.T) {
@@ -74,7 +91,6 @@ func TestInvalidJSONMultiple(t *testing.T) {
 		"pipeline": "us1",
 	}
 	assert.Equal(t, expected.String(), actual.String())
-
 }
 
 func TestValidJSONDepthOne(t *testing.T) {
@@ -95,7 +111,6 @@ func TestValidJSONDepthOne(t *testing.T) {
 	}
 
 	assert.Equal(t, expected.String(), actual.String())
-
 }
 
 func TestValidJSONDepthTwo(t *testing.T) {
@@ -124,7 +139,6 @@ func TestValidJSONDepthTwo(t *testing.T) {
 	}
 
 	assert.Equal(t, expected.String(), actual.String())
-
 }
 
 func TestTargetOption(t *testing.T) {
@@ -186,17 +200,14 @@ func TestTargetRootOption(t *testing.T) {
 }
 
 func getActualValue(t *testing.T, config *common.Config, input common.MapStr) common.MapStr {
-	if testing.Verbose() {
-		logp.LogInit(logp.LOG_DEBUG, "", false, true, []string{"*"})
-	}
+	logp.TestingSetup()
 
-	p, err := newDecodeJSONFields(*config)
+	p, err := newDecodeJSONFields(config)
 	if err != nil {
 		logp.Err("Error initializing decode_json_fields")
 		t.Fatal(err)
 	}
 
-	actual, err := p.Run(input)
-
-	return actual
+	actual, _ := p.Run(&beat.Event{Fields: input})
+	return actual.Fields
 }

@@ -35,11 +35,11 @@ This updates all fields and docs with the most recent changes.
 
 ## Use vendoring
 
-We recommend to use vendoring for your beat. This means the dependencies are put into your beat folder. The beats team currently uses [glide](https://github.com/Masterminds/glide) for vendoring.
+We recommend to use vendoring for your beat. This means the dependencies are put into your beat folder. The beats team currently uses [govendor](https://github.com/kardianos/govendor) for vendoring.
 
 ```
-glide init
-glide update --quick
+govendor init
+govendor update +e
 ```
 
 This will create a directory `vendor` inside your repository. To make sure all dependencies for the Makefile commands are loaded from the vendor directory, find the following line in your Makefile:
@@ -76,7 +76,7 @@ git commit -m "Add {beat}"
 The beat frameworks provides tools to crosscompile and package your beat for different platforms. This requires [docker](https://www.docker.com/) and vendoring as described above. To build packages of your beat, run the following command:
 
 ```
-make package
+make release
 ```
 
 This will fetch and create all images required for the build process. The hole process to finish can take several minutes.

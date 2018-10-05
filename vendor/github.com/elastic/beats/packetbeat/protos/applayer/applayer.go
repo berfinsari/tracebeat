@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // Package applayer provides common definitions with common fields
 // for use with application layer protocols among beats.
 package applayer
@@ -6,6 +23,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/common/streambuf"
 )
@@ -174,16 +192,7 @@ func (t *Transaction) Init(
 	// transactions have microseconds resolution
 	t.Ts.Ts = time
 	t.Ts.Millis = int64(time.UnixNano() / 1000)
-	t.Src = common.Endpoint{
-		IP:   tuple.SrcIP.String(),
-		Port: tuple.SrcPort,
-		Proc: string(cmdline.Src),
-	}
-	t.Dst = common.Endpoint{
-		IP:   tuple.DstIP.String(),
-		Port: tuple.DstPort,
-		Proc: string(cmdline.Dst),
-	}
+	t.Src, t.Dst = common.MakeEndpointPair(tuple.BaseTuple, cmdline)
 	t.Notes = notes
 
 	if direction == NetReverseDirection {
@@ -210,18 +219,20 @@ func (t *Transaction) InitWithMsg(
 }
 
 // Event fills common event fields.
-func (t *Transaction) Event(event common.MapStr) error {
-	event["type"] = t.Type
-	event["@timestamp"] = common.Time(t.Ts.Ts)
-	event["responsetime"] = t.ResponseTime
-	event["src"] = &t.Src
-	event["dst"] = &t.Dst
-	event["transport"] = t.Transport.String()
-	event["bytes_out"] = t.BytesOut
-	event["bytes_in"] = t.BytesIn
-	event["status"] = t.Status
+func (t *Transaction) Event(event *beat.Event) error {
+	event.Timestamp = t.Ts.Ts
+
+	fields := event.Fields
+	fields["type"] = t.Type
+	fields["responsetime"] = t.ResponseTime
+	fields["src"] = &t.Src
+	fields["dst"] = &t.Dst
+	fields["transport"] = t.Transport.String()
+	fields["bytes_out"] = t.BytesOut
+	fields["bytes_in"] = t.BytesIn
+	fields["status"] = t.Status
 	if len(t.Notes) > 0 {
-		event["notes"] = t.Notes
+		fields["notes"] = t.Notes
 	}
 	return nil
 }

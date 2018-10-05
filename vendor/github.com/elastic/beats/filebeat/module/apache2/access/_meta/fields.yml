@@ -85,6 +85,11 @@
           type: keyword
           description: >
             The name of the operating system.
+        - name: original
+          type: text
+          index: false
+          description: >
+            Original user agent value before parsing by ingest-user-agent plugin.
     - name: geoip
       type: group
       description: >
@@ -104,4 +109,15 @@
           type: geo_point
           description: >
             The longitude and latitude.
-
+        - name: region_name
+          type: keyword
+          description: >
+            The region name.
+        - name: city_name
+          type: keyword
+          description: >
+            The city name.
+        - name: region_iso_code
+          type: keyword
+          description: >
+            Region ISO code.

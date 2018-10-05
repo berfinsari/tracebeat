@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package dtfmt
 
 import (
@@ -28,6 +45,7 @@ type unpaddedNumber struct {
 
 type paddedNumber struct {
 	ft                   fieldType
+	div                  int
 	minDigits, maxDigits int
 	signed               bool
 }
@@ -39,6 +57,10 @@ type textField struct {
 
 type twoDigitYear struct {
 	ft fieldType
+}
+
+type paddingZeros struct {
+	count int
 }
 
 func (runeLiteral) requires(*ctxConfig) error { return nil }
@@ -98,10 +120,15 @@ func numRequires(c *ctxConfig, ft fieldType) error {
 		ftMinuteOfDay,
 		ftMinuteOfHour,
 		ftSecondOfDay,
-		ftSecondOfMinute,
-		ftMillisOfDay,
-		ftMillisOfSecond:
+		ftSecondOfMinute:
 		c.enableClock()
+
+	case ftMillisOfDay:
+		c.enableClock()
+		c.enableMillis()
+
+	case ftMillisOfSecond:
+		c.enableMillis()
 	}
 
 	return nil
@@ -160,7 +187,10 @@ func (n unpaddedNumber) compile() (prog, error) {
 }
 
 func (n paddedNumber) compile() (prog, error) {
-	return makeProg(opNumPadded, byte(n.ft), byte(n.maxDigits))
+	if n.div == 0 {
+		return makeProg(opNumPadded, byte(n.ft), byte(n.maxDigits))
+	}
+	return makeProg(opExtNumPadded, byte(n.ft), byte(n.div), byte(n.maxDigits))
 }
 
 func (n twoDigitYear) compile() (prog, error) {
@@ -172,4 +202,10 @@ func (f textField) compile() (prog, error) {
 		return makeProg(opTextShort, byte(f.ft))
 	}
 	return makeProg(opTextLong, byte(f.ft))
+}
+
+func (p paddingZeros) requires(c *ctxConfig) error { return nil }
+func (p paddingZeros) estimateSize() int           { return p.count }
+func (p paddingZeros) compile() (prog, error) {
+	return makeProg(opZeros, byte(p.count))
 }

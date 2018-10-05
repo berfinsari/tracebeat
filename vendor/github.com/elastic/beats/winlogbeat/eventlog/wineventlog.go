@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build windows
 
 package eventlog
@@ -8,13 +25,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/elastic/beats/libbeat/common"
-	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/winlogbeat/sys"
-	win "github.com/elastic/beats/winlogbeat/sys/wineventlog"
 	"github.com/joeshaw/multierror"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
+
+	"github.com/elastic/beats/libbeat/common"
+	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/winlogbeat/checkpoint"
+	"github.com/elastic/beats/winlogbeat/sys"
+	win "github.com/elastic/beats/winlogbeat/sys/wineventlog"
 )
 
 const (
@@ -31,11 +50,10 @@ var winEventLogConfigKeys = append(commonConfigKeys, "batch_read_size",
 
 type winEventLogConfig struct {
 	ConfigCommon  `config:",inline"`
-	BatchReadSize int                    `config:"batch_read_size"` // Maximum number of events that Read will return.
-	IncludeXML    bool                   `config:"include_xml"`
-	Forwarded     *bool                  `config:"forwarded"`
-	SimpleQuery   query                  `config:",inline"`
-	Raw           map[string]interface{} `config:",inline"`
+	BatchReadSize int   `config:"batch_read_size"` // Maximum number of events that Read will return.
+	IncludeXML    bool  `config:"include_xml"`
+	Forwarded     *bool `config:"forwarded"`
+	SimpleQuery   query `config:",inline"`
 }
 
 // defaultWinEventLogConfig is the default configuration for new wineventlog readers.
@@ -71,18 +89,17 @@ var _ EventLog = &winEventLog{}
 type winEventLog struct {
 	config       winEventLogConfig
 	query        string
-	channelName  string        // Name of the channel from which to read.
-	subscription win.EvtHandle // Handle to the subscription.
-	maxRead      int           // Maximum number returned in one Read.
-	lastRead     uint64        // Record number of the last read event.
+	channelName  string                   // Name of the channel from which to read.
+	subscription win.EvtHandle            // Handle to the subscription.
+	maxRead      int                      // Maximum number returned in one Read.
+	lastRead     checkpoint.EventLogState // Record number of the last read event.
 
 	render    func(event win.EvtHandle, out io.Writer) error // Function for rendering the event to XML.
 	renderBuf []byte                                         // Buffer used for rendering event.
 	outputBuf *sys.ByteBuffer                                // Buffer for receiving XML
 	cache     *messageFilesCache                             // Cached mapping of source name to event message file handles.
 
-	logPrefix     string               // String to prefix on log messages.
-	eventMetadata common.EventMetadata // Field and tags to add to each event.
+	logPrefix string // String to prefix on log messages.
 }
 
 // Name returns the name of the event log (i.e. Application, Security, etc.).
@@ -90,8 +107,14 @@ func (l *winEventLog) Name() string {
 	return l.channelName
 }
 
-func (l *winEventLog) Open(recordNumber uint64) error {
-	bookmark, err := win.CreateBookmark(l.channelName, recordNumber)
+func (l *winEventLog) Open(state checkpoint.EventLogState) error {
+	var bookmark win.EvtHandle
+	var err error
+	if len(state.Bookmark) > 0 {
+		bookmark, err = win.CreateBookmarkFromXML(state.Bookmark)
+	} else {
+		bookmark, err = win.CreateBookmarkFromRecordID(l.channelName, state.RecordNumber)
+	}
 	if err != nil {
 		return err
 	}
@@ -155,8 +178,17 @@ func (l *winEventLog) Read() ([]Record, error) {
 			incrementMetric(dropReasons, err)
 			continue
 		}
+
+		r.Offset = checkpoint.EventLogState{
+			Name:         l.channelName,
+			RecordNumber: r.RecordID,
+			Timestamp:    r.TimeCreated.SystemTime,
+		}
+		if r.Offset.Bookmark, err = l.createBookmarkFromEvent(h); err != nil {
+			logp.Warn("%s failed creating bookmark: %v", l.logPrefix, err)
+		}
 		records = append(records, r)
-		l.lastRead = r.RecordID
+		l.lastRead = r.Offset
 	}
 
 	debugf("%s Read() is returning %d records", l.logPrefix, len(records))
@@ -226,9 +258,8 @@ func (l *winEventLog) buildRecordFromXML(x []byte, recoveredErr error) (Record, 
 	}
 
 	r := Record{
-		API:           winEventLogAPIName,
-		EventMetadata: l.eventMetadata,
-		Event:         e,
+		API:   winEventLogAPIName,
+		Event: e,
 	}
 
 	if l.config.IncludeXML {
@@ -240,7 +271,7 @@ func (l *winEventLog) buildRecordFromXML(x []byte, recoveredErr error) (Record, 
 
 // newWinEventLog creates and returns a new EventLog for reading event logs
 // using the Windows Event Log.
-func newWinEventLog(options map[string]interface{}) (EventLog, error) {
+func newWinEventLog(options *common.Config) (EventLog, error) {
 	c := defaultWinEventLogConfig
 	if err := readConfig(options, &c, winEventLogConfigKeys); err != nil {
 		return nil, err
@@ -274,15 +305,14 @@ func newWinEventLog(options map[string]interface{}) (EventLog, error) {
 	}
 
 	l := &winEventLog{
-		config:        c,
-		query:         query,
-		channelName:   c.Name,
-		maxRead:       c.BatchReadSize,
-		renderBuf:     make([]byte, renderBufferSize),
-		outputBuf:     sys.NewByteBuffer(renderBufferSize),
-		cache:         newMessageFilesCache(c.Name, eventMetadataHandle, freeHandle),
-		logPrefix:     fmt.Sprintf("WinEventLog[%s]", c.Name),
-		eventMetadata: c.EventMetadata,
+		config:      c,
+		query:       query,
+		channelName: c.Name,
+		maxRead:     c.BatchReadSize,
+		renderBuf:   make([]byte, renderBufferSize),
+		outputBuf:   sys.NewByteBuffer(renderBufferSize),
+		cache:       newMessageFilesCache(c.Name, eventMetadataHandle, freeHandle),
+		logPrefix:   fmt.Sprintf("WinEventLog[%s]", c.Name),
 	}
 
 	// Forwarded events should be rendered using RenderEventXML. It is more
@@ -301,6 +331,17 @@ func newWinEventLog(options map[string]interface{}) (EventLog, error) {
 	}
 
 	return l, nil
+}
+
+func (l *winEventLog) createBookmarkFromEvent(evtHandle win.EvtHandle) (string, error) {
+	bmHandle, err := win.CreateBookmarkFromEvent(evtHandle)
+	if err != nil {
+		return "", err
+	}
+	l.outputBuf.Reset()
+	err = win.RenderBookmarkXML(bmHandle, l.renderBuf, l.outputBuf)
+	win.Close(bmHandle)
+	return string(l.outputBuf.Bytes()), err
 }
 
 func init() {

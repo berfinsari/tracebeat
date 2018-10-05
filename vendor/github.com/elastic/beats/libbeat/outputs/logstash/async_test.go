@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 // +build !integration
 
 package logstash
@@ -7,13 +24,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elastic/beats/libbeat/beat"
 	"github.com/elastic/beats/libbeat/outputs"
-	"github.com/elastic/beats/libbeat/outputs/mode"
+	"github.com/elastic/beats/libbeat/outputs/outest"
 	"github.com/elastic/beats/libbeat/outputs/transport"
 )
 
 type testAsyncDriver struct {
-	client  mode.AsyncProtocolClient
+	client  outputs.NetworkClient
 	ch      chan testDriverCommand
 	returns []testClientReturn
 	wg      sync.WaitGroup
@@ -31,32 +49,23 @@ func TestAsyncStructuredEvent(t *testing.T) {
 	testStructuredEvent(t, makeAsyncTestClient)
 }
 
-func TestAsyncMultiFailMaxTimeouts(t *testing.T) {
-	testMultiFailMaxTimeouts(t, makeAsyncTestClient)
-}
-
 func makeAsyncTestClient(conn *transport.Client) testClientDriver {
-	return newAsyncTestDriver(newAsyncTestClient(conn))
-}
-
-func newAsyncTestClient(conn *transport.Client) *asyncClient {
-	c, err := newAsyncLumberjackClient(conn,
-		1, 3, testMaxWindowSize, 100*time.Millisecond, "testbeat")
+	config := defaultConfig
+	config.Timeout = 1 * time.Second
+	config.Pipelining = 3
+	client, err := newAsyncClient(beat.Info{}, conn, outputs.NewNilObserver(), &config)
 	if err != nil {
 		panic(err)
 	}
-	c.Connect(100 * time.Millisecond)
-	return c
+	return newAsyncTestDriver(client)
 }
 
-func newAsyncTestDriver(client mode.AsyncProtocolClient) *testAsyncDriver {
+func newAsyncTestDriver(client outputs.NetworkClient) *testAsyncDriver {
 	driver := &testAsyncDriver{
 		client:  client,
 		ch:      make(chan testDriverCommand, 1),
 		returns: nil,
 	}
-
-	resp := make(chan testClientReturn, 1)
 
 	driver.wg.Add(1)
 	go func() {
@@ -72,23 +81,12 @@ func newAsyncTestDriver(client mode.AsyncProtocolClient) *testAsyncDriver {
 			case driverCmdQuit:
 				return
 			case driverCmdConnect:
-				driver.client.Connect(1 * time.Second)
+				driver.client.Connect()
 			case driverCmdClose:
 				driver.client.Close()
 			case driverCmdPublish:
-				cb := func(data []outputs.Data, err error) {
-					n := len(cmd.data) - len(data)
-					ret := testClientReturn{n, err}
-					resp <- ret
-				}
-
-				err := driver.client.AsyncPublishEvents(cb, cmd.data)
-				if err != nil {
-					driver.returns = append(driver.returns, testClientReturn{0, err})
-				} else {
-					r := <-resp
-					driver.returns = append(driver.returns, r)
-				}
+				err := driver.client.Publish(cmd.batch)
+				driver.returns = append(driver.returns, testClientReturn{cmd.batch, err})
 			}
 		}
 	}()
@@ -114,8 +112,8 @@ func (t *testAsyncDriver) Stop() {
 	}
 }
 
-func (t *testAsyncDriver) Publish(data []outputs.Data) {
-	t.ch <- testDriverCommand{code: driverCmdPublish, data: data}
+func (t *testAsyncDriver) Publish(batch *outest.Batch) {
+	t.ch <- testDriverCommand{code: driverCmdPublish, batch: batch}
 }
 
 func (t *testAsyncDriver) Returns() []testClientReturn {

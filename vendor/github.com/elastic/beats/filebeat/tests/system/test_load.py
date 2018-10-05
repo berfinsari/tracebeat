@@ -34,7 +34,7 @@ class Test(BaseTest):
         total_lines = 1000
         lines_per_file = 10
         # Each line should have the same length + line ending
-        # Some spare capacity is added to make sure all events are presisted
+        # Some spare capacity is added to make sure all events are persisted
         line_length = len(str(total_lines)) + 1
 
         # Setup python log handler
@@ -45,7 +45,8 @@ class Test(BaseTest):
 
         self.render_config_template(
             path=os.path.abspath(self.working_dir) + "/log/*",
-            rotate_every_kb=(total_lines * (line_length + 1)),    # With filepath, each line can be up to 1KB is assumed
+            # With filepath, each line can be up to 1KB is assumed
+            rotate_every_kb=(total_lines * (line_length + 1)),
             clean_removed="false",
         )
 
@@ -54,7 +55,8 @@ class Test(BaseTest):
 
         # wait until filebeat is fully running
         self.wait_until(
-            lambda: self.log_contains("Loading and starting Prospectors completed."),
+            lambda: self.log_contains(
+                "Loading and starting Inputs completed."),
             max_timeout=15)
 
         # Start logging and rotating
@@ -68,8 +70,6 @@ class Test(BaseTest):
             lambda: self.output_has(lines=total_lines),
             max_timeout=15)
 
-        filebeat.check_kill_and_wait()
-
         entry_list = []
 
         with open(self.working_dir + "/output/filebeat") as f:
@@ -78,7 +78,7 @@ class Test(BaseTest):
                 v = int(content["message"])
                 entry_list.append(v)
 
-        ### This lines can be uncomemnted for debugging ###
+        ### This lines can be uncommented for debugging ###
         # Prints out the missing entries
         # for i in range(total_lines):
         #    if i not in entry_list:
@@ -91,10 +91,12 @@ class Test(BaseTest):
         # print "Registry entries: " + str(len(data))
 
         # Check that file exist
-        data = self.get_registry()
-
         paths = os.listdir(self.working_dir + "/log/")
-        assert len(paths) == len(data)
+        self.wait_until(
+            lambda: len(paths) == len(self.get_registry()),
+        )
+
+        filebeat.check_kill_and_wait()
 
         for i in range(total_lines):
             assert i in entry_list

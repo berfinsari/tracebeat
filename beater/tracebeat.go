@@ -8,7 +8,6 @@ import (
 	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
-	"github.com/elastic/beats/libbeat/publisher"
 
 	"github.com/berfinsari/tracebeat/config"
 )
@@ -16,7 +15,7 @@ import (
 type Tracebeat struct {
 	done       chan struct{}
 	config     config.TracebeatConfig
-	client     publisher.Client
+	client     beat.Client
 	TbConfig   config.ConfigSettings
 	period     time.Duration
 	host       string
@@ -34,7 +33,7 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 	}
 	err := cfgfile.Read(&tb.TbConfig, "")
 	if err != nil {
-		logp.Err("Error reading configuration file: %v", err)
+		//logp.Err("Error reading configuration file: %v", err)
 		return nil, fmt.Errorf("Error reading configuration file: %v", err)
 	}
 
@@ -44,7 +43,11 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 func (tb *Tracebeat) Run(b *beat.Beat) error {
 	logp.Info("tracebeat is running! Hit CTRL-C to stop it.")
 
-	tb.client = b.Publisher.Connect()
+	var err error
+	tb.client, err = b.Publisher.Connect()
+	if err != nil {
+		return err
+	}
 	tb.CheckConfig(b)
 
 	ticker := time.NewTicker(tb.period)
@@ -60,13 +63,15 @@ func (tb *Tracebeat) Run(b *beat.Beat) error {
 		if traceerr != nil {
 			return fmt.Errorf("%v", traceerr)
 		}
-		event := common.MapStr{
-			"@timestamp": common.Time(time.Now()),
-			"type":       b.Name,
-			"counter":    counter,
-			"traceroute": traceroute,
+		event := beat.Event{
+			Timestamp: time.Now(),
+			Fields: common.MapStr{
+				"type":       b.Info.Name,
+				"counter":    counter,
+				"traceroute": traceroute,
+			},
 		}
-		tb.client.PublishEvent(event)
+		tb.client.Publish(event)
 		logp.Info("Event sent")
 		counter++
 	}

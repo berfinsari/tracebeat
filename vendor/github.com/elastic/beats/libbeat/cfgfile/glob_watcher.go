@@ -1,3 +1,20 @@
+// Licensed to Elasticsearch B.V. under one or more contributor
+// license agreements. See the NOTICE file distributed with
+// this work for additional information regarding copyright
+// ownership. Elasticsearch B.V. licenses this file to you under
+// the Apache License, Version 2.0 (the "License"); you may
+// not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
 package cfgfile
 
 import (
@@ -5,8 +22,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/elastic/beats/libbeat/logp"
 	"github.com/mitchellh/hashstructure"
+
+	"github.com/elastic/beats/libbeat/logp"
 )
 
 type GlobWatcher struct {
@@ -30,7 +48,6 @@ func NewGlobWatcher(glob string) *GlobWatcher {
 // The modtime is compared based on second as normally mod-time is in seconds. If it is unclear if something changed
 // the method will return true for the changes. It is strongly recommend to call scan not more frequent then 1s.
 func (gw *GlobWatcher) Scan() ([]string, bool, error) {
-
 	globList, err := filepath.Glob(gw.glob)
 	if err != nil {
 		return nil, false, err
@@ -59,7 +76,7 @@ func (gw *GlobWatcher) Scan() ([]string, bool, error) {
 		// File modification time can be in seconds. -1 + truncation is to cover for files which
 		// were created during this second.
 		// If the last scan was at 09:02:15.00001 it will pick up files which were modified also 09:02:14
-		// As this scan no necessarly picked up files form 09:02:14
+		// As this scan no necessarily picked up files form 09:02:14
 		// TODO: How could this be improved / simplified? Behaviour was sometimes flaky. Is ModTime updated with delay?
 		if info.ModTime().After(gw.lastScan.Add(-1 * time.Second).Truncate(time.Second)) {
 			updatedFiles = true
